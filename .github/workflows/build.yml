@@ -1401,15 +1401,47 @@ jobs:
             echo "::error title=缺少 KMI 白名单::$KSYMS_RAW 不存在。TRIM_UNUSED_KSYMS=y 时必须提供白名单, 否则会把厂商模块依赖的符号全裁掉。"
             exit 1
           fi
-          KSYMS_COUNT=$(grep -c . "$KSYMS_RAW" || true)
-          echo "  白名单符号数: $KSYMS_COUNT (期望约 6501)"
-          if [ "$KSYMS_COUNT" -lt 6000 ]; then
-            echo "::error title=KMI 白名单过短::$KSYMS_RAW 只有 $KSYMS_COUNT 个符号"
+          # ★ KMI 白名单必须是 LF（run#20 编译失败的根因）
+          #   kit 原件的 vmlinux_abi_symbollist.raw 是 CRLF。kernel 的 trim_ksyms
+          #   按 \n 切行、**不剥离 \r**，于是符号名末尾带 \r，生成的
+          #   include/generated/autoksyms.h 畸形：
+          #       #define __KSYM_I_BDEV\r 1
+          #   编译时报 `expected identifier or '('`、
+          #   `__KSYM_module_layout macro redefined`，kernel 构建直接挂掉
+          #   （run#20 实测；下游的 arch_spinlock_t 未定义等都是它的连锁症状）。
+          #
+          #   仓库里的该文件已【本身转换为 LF】（git blob 实测 CR=0）。
+          #   这里仍做两道硬校验防回归；万一有人用 Windows 工具把 CRLF 放回来，
+          #   自动 tr 兜底并告警，不让构建挂掉。
+          mkdir -p "$GITHUB_WORKSPACE/build-logs"
+          KSYMS_LF="$KSYMS_RAW"
+          if grep -q $'\r' "$KSYMS_RAW" 2>/dev/null; then
+            echo "::warning title=KMI 白名单含 CRLF::已自动转换为 LF，请把仓库里的文件也转成 LF"
+            KSYMS_LF="$GITHUB_WORKSPACE/build-logs/vmlinux_abi_symbollist.lf.raw"
+            tr -d '\r' < "$KSYMS_RAW" | sed '/^[[:space:]]*$/d' > "$KSYMS_LF"
+          fi
+          # 硬校验 1：不得含 CR
+          if grep -q $'\r' "$KSYMS_LF" 2>/dev/null; then
+            echo "::error title=白名单仍含 CR::规范化失败"
             exit 1
           fi
+          # 硬校验 2：每行必须是合法 C 符号名
+          if grep -vqE '^[A-Za-z_][A-Za-z0-9_]*$' "$KSYMS_LF"; then
+            echo "::error title=白名单含非法符号行::"
+            grep -nvE '^[A-Za-z_][A-Za-z0-9_]*$' "$KSYMS_LF" | head -5
+            exit 1
+          fi
+          KSYMS_COUNT=$(grep -c . "$KSYMS_LF" || true)
+          echo "  KMI 白名单: $KSYMS_LF"
+          echo "  白名单符号数: $KSYMS_COUNT (期望 6501)"
+          if [ "$KSYMS_COUNT" -lt 6000 ]; then
+            echo "::error title=KMI 白名单过短::$KSYMS_LF 只有 $KSYMS_COUNT 个符号"
+            exit 1
+          fi
+          head -3 "$KSYMS_LF" | sed 's/^/    /'
           {
             echo "CONFIG_TRIM_UNUSED_KSYMS=y"
-            echo "CONFIG_UNUSED_KSYMS_WHITELIST=\"$KSYMS_RAW\""
+            echo "CONFIG_UNUSED_KSYMS_WHITELIST=\"$KSYMS_LF\""
           } >> "$DEFCONFIG"
           # 防御: 不允许残留魅族内网路径
           if grep -q 'jenkins-m2481\|/home/flyme/' "$DEFCONFIG"; then
@@ -1736,7 +1768,14 @@ jobs:
               sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' ./common/build.config.gki.aarch64
 
               if [ -f "build/build.sh" ]; then
-                LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh CC="/usr/bin/ccache clang" || exit 1
+                # ★ 同样按 inputs.lto_mode，不写死 thin
+                LEGACY_LTO="${{ inputs.lto_mode }}"
+                if [ -z "$LEGACY_LTO" ] || [ "$LEGACY_LTO" = "auto" ]; then
+                  LEGACY_LTO="thin"
+                  [ "${{ inputs.kernel_version }}" = "6.12" ] && LEGACY_LTO="none"
+                fi
+                echo "=== legacy 构建参数: LTO=$LEGACY_LTO ==="
+                LTO="$LEGACY_LTO" BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh CC="/usr/bin/ccache clang" || exit 1
                 strings "out/${{ inputs.android_version }}-${{ inputs.kernel_version }}/dist/Image" | grep 'Linux version'
               else
                 # 提取 gki_defconfig 修改到 fragment，避免 bazel trim 检查失败
@@ -1750,10 +1789,28 @@ jobs:
                 if [ -s "$FRAG" ]; then
                   FRAG_FLAG="--defconfig_fragment=//common:arch/arm64/configs/ksu.fragment"
                 fi
-                LTO_FLAG="--lto=thin"
-                if [ "${{ inputs.kernel_version }}" = "6.12" ]; then
-                  LTO_FLAG="--lto=none"
+                # ★ 按 inputs.lto_mode 决定，而不是按 kernel_version 写死。
+                #   21 Pro 原厂 LTO=none，kit README 也明确要求 none：
+                #   thin 会改变内联/优化策略 -> kCFI Type Hash 分布不同 ->
+                #   厂商模块间接调用时哈希对不上 -> CFI failure -> 卡第一屏。
+                #   auto = 保留历史行为（6.12 用 none，其余 thin）。
+                LTO_WANT="${{ inputs.lto_mode }}"
+                if [ -z "$LTO_WANT" ] || [ "$LTO_WANT" = "auto" ]; then
+                  LTO_WANT="thin"
+                  [ "${{ inputs.kernel_version }}" = "6.12" ] && LTO_WANT="none"
                 fi
+                case "$LTO_WANT" in
+                  none|thin|full) ;;
+                  *) echo "::error title=非法 lto_mode::$LTO_WANT（应为 none/thin/full/auto）"; exit 1 ;;
+                esac
+                LTO_FLAG="--lto=$LTO_WANT"
+                echo "=== bazel 构建参数 ==="
+                echo "  lto_mode(input) = ${{ inputs.lto_mode }}"
+                echo "  LTO_WANT        = $LTO_WANT"
+                echo "  LTO_FLAG        = $LTO_FLAG"
+                echo "  FRAG_FLAG       = ${FRAG_FLAG:-<无>}"
+                echo "  CONFIG          = --config=fast"
+                echo "  full cmd        = tools/bazel build --disk_cache=... --config=fast $LTO_FLAG $FRAG_FLAG //common:kernel_aarch64_dist"
                 tools/bazel build --disk_cache=/home/runner/.cache/bazel --config=fast $LTO_FLAG $FRAG_FLAG //common:kernel_aarch64_dist || exit 1
                 strings ./bazel-bin/common/kernel_aarch64/Image | grep 'Linux version'
               fi
