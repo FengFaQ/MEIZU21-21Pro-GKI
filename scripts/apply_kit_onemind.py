@@ -448,9 +448,17 @@ def apply_version_c(p):
         p.fail("%s 不存在" % rel)
         return
     src = p.read(rel)
-    if "只放宽 CRC, 不放宽符号缺失" in src:
-        p.note("  跳过(已打过): %s [%s]" % (rel, MARK + "_VER"))
+
+    # ★ 幂等判据必须检查【实际效果】，不能检查特定注释文本。
+    #   因为 kit 的 apply_mz_ko_and_onemind.py 也会改这个文件，
+    #   它写的是不带我们注释的裸版本（`bad_version:\n\treturn 1;`）。
+    #   若按注释判断就会出现"已经改好了却报找不到锚点"的假失败（本地实测踩过）。
+    import re as _re
+    if _re.search(r"bad_version:\s*\n(?:\s*(?:/\*.*?\*/\s*\n)?)*\s*return\s+1\s*;",
+                  src, _re.S):
+        p.note("  跳过(已放行): %s (bad_version 已是 return 1)" % rel)
         return
+
     # kits 的做法：bad_version: 分支直接 return 1
     old = """bad_version:
 	pr_warn("%s: disagrees about version of symbol %s\\n", info->name, symname);
