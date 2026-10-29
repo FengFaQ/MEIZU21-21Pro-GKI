@@ -478,42 +478,72 @@ def apply_vmscan(p):
 # 5) include/linux/mm_inline.h —— lru_gen_add_folio 的 MGLRU hook
 # ======================================================================
 def apply_mm_inline(p):
+    """只【校验】kit patch 是否已正确插入 lru_gen hook，绝不自己插入。
+
+    ## 为什么改成"只校验不插入"（run#22 实测教训）
+    原实现往 `lru_gen_add_folio()` 的 if/else 链中间插：
+        if (folio_test_active(folio))
+            mz_seq = seq;                                          <- 插在这
+            trace_android_vh_memcg_protect_lru_gen_add_folio(...);  <- 还有这个
+        else if (...)                                              <- else 前有语句 -> 语法错
+
+    run#22 报错：
+        mm_inline.h:250:3: error: misleading indentation; statement is not part of
+                           the previous 'if' [-Werror,-Wmisleading-indentation]
+            mz_seq = seq;
+        mm_inline.h:252:3: error: call to undeclared function
+                           'trace_android_vh_memcg_protect_lru_gen_add_folio'
+        mm_inline.h:253:2: error: expected expression
+            else if (...)
+
+    而 **kit patch 自己已经做对了** —— 插在整条 if/else 链【结束之后】：
+        @@ -248,6 +251,7 @@
+         	else
+         		seq = lrugen->min_seq[type];
+
+        +	memcg_protect_lru_gen_add_folio(type, lrugen, lruvec, &seq);
+         	gen = lru_gen_from_seq(seq);
+
+    我们那份是重复劳动且位置错误。而且我们调的是 **trace hook 函数**，
+    需要 `#include <trace/hooks/mm.h>` 才可见；kit 插的是 mm_inline.h 内部
+    自己声明的普通函数，没有这个依赖。删掉我们的插入后 undeclared 也自动消失。
+    """
     rel = "include/linux/mm_inline.h"
     if not os.path.isfile(p.path(rel)):
         p.fail("%s 不存在" % rel)
         return
     src = p.read(rel)
-    if MARK + "_LRUGEN" in src:
-        p.note("  跳过(已打过): %s [%s]" % (rel, MARK + "_LRUGEN"))
-        return
-    # 6.1 里 lru_gen_add_folio 有两个定义：CONFIG_LRU_GEN 下为完整实现，
-    # 否则为 `return false;` 的桩。必须定位到「完整实现」那一个。
-    anchor = "static inline bool lru_gen_add_folio(struct lruvec *lruvec, struct folio *folio, bool reclaiming)\n{\n\tunsigned long seq;\n"
-    if src.count(anchor) != 1:
-        p.fail("%s 里 lru_gen_add_folio 完整实现锚点出现 %d 次（期望 1）"
-               % (rel, src.count(anchor)))
-        return
-    i = src.index(anchor)
-    j = src.index("{", i)
-    # 先确认 hook 调用点存在（在任何修改之前定位，避免插入后锚点失配）
-    seq_anchor = "\t\tseq = lrugen->max_seq;\n"
-    ni = src.find(seq_anchor, i)
-    fe = src.find("\n\treturn true;\n}\n", i)
-    if ni < 0 or (fe > 0 and ni > fe):
-        p.fail("%s 里 lru_gen_add_folio 的 seq = lrugen->max_seq 锚点缺失" % rel)
-        return
-    block = ("\n\t/* %s: OneMind mz_mm_protect 在 MGLRU 入队时识别 protect memcg */\n"
-             "\tunsigned long mz_seq;\n" % MARK)
-    # 从后往前插，保证前面的下标仍然有效
-    mz_seq_init = "\t\tmz_seq = seq;\n"
-    hook = ("\t\t/* %s: 通知厂商模块, 回调可提升代际以保护文件缓存 */\n"
-            "\t\ttrace_android_vh_memcg_protect_lru_gen_add_folio(type, lrugen, lruvec, &mz_seq);\n"
-            % MARK)
-    src = src[:ni + len(seq_anchor)] + mz_seq_init + hook + src[ni + len(seq_anchor):]
-    src = src[:j + 1] + block + src[j + 1:]
-    src += "\n/* %s */\n" % (MARK + "_LRUGEN")
-    p.write(rel, src)
-    p.note("  已打: %s (lru_gen_add_folio 的 hook 调用点)" % rel)
+
+    # 第一步：若存在我们旧版插入的痕迹（mz_seq），自动还原
+    if "mz_seq" in src:
+        import re as _re
+        before = src
+        src = _re.sub(
+            r"\n\t\t/\* %s: 通知厂商模块[^\n]*\*/\n"
+            r"\t\ttrace_android_vh_memcg_protect_lru_gen_add_folio\([^)]*&mz_seq\);\n"
+            % _re.escape(MARK), "\n", src)
+        src = _re.sub(r"\n\t\tmz_seq = seq;\n", "\n", src)
+        src = _re.sub(
+            r"\n\t/\* %s: OneMind mz_mm_protect 在 MGLRU 入队时识别 protect memcg \*/\n"
+            r"\tunsigned long mz_seq;\n" % _re.escape(MARK), "\n", src)
+        src = src.replace("\n/* %s */\n" % (MARK + "_LRUGEN"), "\n")
+        if src != before:
+            p.write(rel, src)
+            p.note("  已还原: %s（删除旧版错误插入的 mz_seq hook，它破坏了 if/else 结构）"
+                   % rel)
+        else:
+            p.fail("%s 里有 mz_seq 但未能自动还原，会导致编译失败，请人工检查" % rel)
+            return
+
+    # 第二步：校验 kit patch 的正确插入是否存在
+    if "memcg_protect_lru_gen_add_folio" in src:
+        p.note("  OK   %s: 已有 memcg_protect_lru_gen_add_folio 调用（kit patch 已正确插入）"
+               % rel)
+    else:
+        # kit 的该 hunk 可能被 reject。**不自己插**（会再次插错位置），只告警：
+        # 该 hook 缺失只影响 MGLRU 下文件缓存保护，不影响开机（非生死线）。
+        p.note("  WARN %s: 未发现 memcg_protect_lru_gen_add_folio 调用"
+               "（kit patch 该 hunk 可能被 reject；不影响开机）" % rel)
 
 
 # ======================================================================
