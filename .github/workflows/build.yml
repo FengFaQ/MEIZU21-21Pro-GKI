@@ -1620,7 +1620,19 @@ jobs:
             git -C "$COMMON" apply --reject "$FILTERED" \
               >> "$GITHUB_WORKSPACE/build-logs/kit_patch.log" 2>&1 || true
             echo "  git apply 结束（.rej 由后续脚本补齐）"
-            find "$COMMON" -name '*.rej' 2>/dev/null | head -10 | sed 's/^/    rej: /' || true
+            # 诊断：把被拒 hunk 的实际内容打出来。--reject 模式下某个 hunk
+            # 打不上会落成 .rej，但整文件可能仍报 "Applied cleanly"，
+            # 光看日志会误以为全部成功（run#18/19 的排查教训）。
+            REJ_LIST=$(find "$COMMON" -name '*.rej' 2>/dev/null || true)
+            if [ -n "$REJ_LIST" ]; then
+              echo "  === 被拒 hunk 明细 ==="
+              while IFS= read -r rj; do
+                echo "  --- $rj ---"
+                sed 's/^/      /' "$rj" || true
+              done <<< "$REJ_LIST"
+            else
+              echo "  无 .rej（全部 hunk 应用成功）"
+            fi
           else
             echo "  $COMMON 不是 git 仓库，跳过 git apply"
           fi
