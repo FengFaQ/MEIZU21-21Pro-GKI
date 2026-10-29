@@ -1445,9 +1445,23 @@ jobs:
             exit 1
           fi
           head -3 "$KSYMS_LF" | sed 's/^/    /'
+
+          # ★ 必须把白名单【拷进内核源码树】并用 srctree 相对路径。
+          #   原因：这行 config 会被抽进 ksu.fragment，然后 defconfig 被还原 ——
+          #   它只活在 fragment 里。而 kleaf/bazel 在 sandbox 内构建，
+          #   $GITHUB_WORKSPACE / build-logs 都不在 sandbox 可见范围。
+          #   若写构建机绝对路径，白名单会**静默读不到** ->
+          #   trim_ksyms 当作空白名单 -> 未使用符号全裁 ->
+          #   厂商 471 个 .ko 大量 Unknown symbol -> 卡第一屏，而编译全绿。
+          #   CONFIG_UNUSED_KSYMS_WHITELIST 的语义是 $(srctree)/<该值>，
+          #   所以写相对路径（相对内核源码根 = common/）才正确。
+          KSYMS_IN_TREE_DIR="$KERNEL_ROOT/common"
+          [ -d "$KSYMS_IN_TREE_DIR" ] || KSYMS_IN_TREE_DIR="."
+          cp -f "$KSYMS_LF" "$KSYMS_IN_TREE_DIR/abi_symbollist.raw"
+          echo "  白名单已拷入内核树: $KSYMS_IN_TREE_DIR/abi_symbollist.raw ($(wc -l < "$KSYMS_IN_TREE_DIR/abi_symbollist.raw") 行)"
           {
             echo "CONFIG_TRIM_UNUSED_KSYMS=y"
-            echo "CONFIG_UNUSED_KSYMS_WHITELIST=\"$KSYMS_LF\""
+            echo "CONFIG_UNUSED_KSYMS_WHITELIST=\"abi_symbollist.raw\""
           } >> "$DEFCONFIG"
           # 防御: 不允许残留魅族内网路径
           if grep -q 'jenkins-m2481\|/home/flyme/' "$DEFCONFIG"; then
@@ -1919,6 +1933,27 @@ jobs:
           echo "stock=$STOCK"
           echo "image=${IMG:-<无, 跳过二进制 CRC 锁定>}"
           mkdir -p "$GITHUB_WORKSPACE/build-logs"
+          # ★ 验证 KMI 白名单真的生效了（TRIM_UNUSED_KSYMS=y 时才裁符号）
+          #   若白名单没被 kleaf 看见，trim 会把厂商模块依赖的符号裁光 ->
+          #   设备上 471 个 .ko 大量 Unknown symbol -> 卡第一屏，而编译全绿。
+          if grep -q '^CONFIG_TRIM_UNUSED_KSYMS=y' "$GITHUB_WORKSPACE/build-logs/kernel.config" 2>/dev/null \
+             || grep -q '^CONFIG_TRIM_UNUSED_KSYMS=y' "$DEFCONFIG" 2>/dev/null; then
+            MISSING_IN_BIN=$(grep -cvE '^$' /dev/null || true)
+            if [ -f "$BUILT" ]; then
+              WL="$GITHUB_WORKSPACE/${DEVICE_DIR:-device/meizu21pro}/vmlinux_abi_symbollist.raw"
+              if [ -f "$WL" ]; then
+                # 白名单里有多少符号没出现在编译产物的 Module.symvers 里
+                WL_N=$(grep -c . "$WL" || true)
+                MISS_N=$(comm -23 <(sort -u "$WL") <(awk '{print $2}' "$BUILT" | sort -u) | wc -l)
+                echo "白名单符号数=$WL_N, 编译产物中缺失=$MISS_N"
+                if [ "$MISS_N" -gt 1500 ]; then
+                  echo "::error title=KMI 白名单疑似未生效::白名单 $WL_N 个符号里有 $MISS_N 个不在 Module.symvers 中(>1500)，说明 trim_ksyms 没读到白名单"
+                  exit 1
+                fi
+              fi
+            fi
+          fi
+
           python3 "$GITHUB_WORKSPACE/scripts/check_krcrc_symvers.py" "$BUILT" "$STOCK" "${IMG:-}" 2>&1 \
             | tee "$GITHUB_WORKSPACE/build-logs/krcrc_audit.log"
           test "${PIPESTATUS[0]}" -eq 0 || {
@@ -1963,10 +1998,19 @@ jobs:
           # 1) glob AOSP prebuilt clang（首选：瞬时、路径确定）
           #    实际路径 $KERNEL_ROOT/prebuilts/clang/host/linux-x86/clang-r*/bin
           #    深度 7，所以 find -maxdepth 6 必然差一层找不到。
-          for d in "$KERNEL_ROOT"/prebuilts/clang/host/linux-x86/clang-r*/bin \
-                   "$KERNEL_ROOT"/prebuilts/clang/host/linux-x86/*/bin; do
+          # ⚠ AOSP 树里常有多个 clang 版本目录，必须取【最新】的：
+          #   llvm-objdump 的输出文本格式随版本变化，用旧版会让 check_kcfi.py 的
+          #   `movk w17` 正则匹配失败 -> 误报 "could not find movk w17 pair"
+          #   -> 被当成 kCFI 不符，把排查方向带偏。
+          #   按版本号降序（sort -Vr）取第一个齐全的。
+          for d in $(ls -d "$KERNEL_ROOT"/prebuilts/clang/host/linux-x86/clang-r*/bin \
+                            "$KERNEL_ROOT"/prebuilts/clang/host/linux-x86/*/bin \
+                            2>/dev/null | sort -Vr); do
             if [ -x "$d/llvm-nm" ] && [ -x "$d/llvm-readelf" ] && [ -x "$d/llvm-objdump" ]; then
-              CLANG_BIN="$d"; break
+              CLANG_BIN="$d"
+              echo "  选定 clang: $CLANG_BIN"
+              echo "  版本: $("$CLANG_BIN/llvm-nm" --version 2>/dev/null | head -1)"
+              break
             fi
           done
 
