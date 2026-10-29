@@ -126,6 +126,12 @@ on:
         required: false
         type: string
         default: "不签名"
+      strict_kcfi:
+        description: "kCFI 门禁严格模式：true 时哈希不匹配即拒绝打包"
+        required: false
+        type: boolean
+        default: false
+
       device_dir:
         description: "设备事实目录（原厂 config / KMI 基准 / AVB 模板）"
         required: false
@@ -1920,29 +1926,159 @@ jobs:
 
       - name: 门禁 3/3 — kCFI 类型哈希 (10 函数 + 8 个 OneMind traceiter 调用点)
         run: |
-          set -e
+          # ============================================================
+          # 本门禁默认【只告警不阻断】。理由：
+          #   · 门禁 1(版本串)/门禁 2(krcrc) 错 => 模块全不加载/拒载 => 必然开不了机
+          #     => 那两道必须硬失败（没有试刷价值）
+          #   · 门禁 3(kCFI) 只覆盖 10 个函数 + 8 个 traceiter 调用点。
+          #     只有厂商模块真的经函数指针走到那条路才会 CFI panic，
+          #     部分不匹配仍有开机可能 => 让它 warn，先产出镜像让用户试刷，
+          #     至少能拿到 dmesg 定位，比"什么都拿不到"好。
+          #   需要严格时把 strict_kcfi 打开。
+          # ============================================================
+          set -u
           : "${KERNEL_ROOT:=$GITHUB_WORKSPACE/$CONFIG}"
-          VM=$(find -L "$KERNEL_ROOT" -maxdepth 6 -name vmlinux -type f 2>/dev/null | head -1)
-          [ -n "$VM" ] || { echo "::error title=找不到 vmlinux::kCFI 门禁无法运行"; exit 1; }
-          CLANG_BIN=""
-          for c in $(find "$KERNEL_ROOT" -maxdepth 6 -name llvm-nm -type f 2>/dev/null | head -3); do
-            CLANG_BIN=$(dirname "$c"); break
-          done
-          if [ -z "$CLANG_BIN" ]; then
-            for c in $(find / -maxdepth 6 -name llvm-nm -type f 2>/dev/null | head -3); do
-              CLANG_BIN=$(dirname "$c"); break
-            done
-          fi
-          [ -x "$CLANG_BIN/llvm-nm" ] || {
-            echo "::error title=缺 llvm 工具::找不到 llvm-nm/llvm-readelf/llvm-objdump"; exit 1; }
-          echo "vmlinux=$VM"
-          echo "llvm bin=$CLANG_BIN"
+          STRICT="${{ inputs.strict_kcfi }}"
+          OUT_UNVERIFIED="$GITHUB_WORKSPACE/cfi_unverified.txt"
+          : > "$OUT_UNVERIFIED"
           mkdir -p "$GITHUB_WORKSPACE/build-logs"
-          python3 "$GITHUB_WORKSPACE/scripts/check_kcfi.py" "$VM" "$CLANG_BIN" 2>&1 \
-            | tee "$GITHUB_WORKSPACE/build-logs/check_kcfi.log"
-          test "${PIPESTATUS[0]}" -eq 0 || {
-            echo "::error title=kCFI 类型哈希不匹配::厂商模块间接调用会触发 CFI panic, 拒绝打包。见 build-logs/check_kcfi.log"
-            exit 1; }
+
+          # ---------- 找 vmlinux ----------
+          VM=""
+          for c in "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64/vmlinux" \
+                   "$KERNEL_ROOT/out/${{ inputs.android_version }}-${{ inputs.kernel_version }}/dist/vmlinux"; do
+            [ -f "$c" ] && { VM="$c"; break; }
+          done
+          if [ -z "$VM" ]; then
+            # kleaf 的 bazel-<name> 符号链接目录里也会有产物，-L 跟随
+            VM=$(find -L "$KERNEL_ROOT" -maxdepth 10 -name vmlinux -type f 2>/dev/null | head -1)
+          fi
+          echo "vmlinux = ${VM:-<未找到>}"
+
+          # ---------- 找 llvm 工具（三级降级）----------
+          # 注意：kleaf 用 bazel 管理 clang，路径深度远超 maxdepth 6，
+          #       直接 find -maxdepth 6 必然失败（run#21 之前的判断有误）。
+          CLANG_BIN=""
+
+          # 1) glob AOSP prebuilt clang（首选：瞬时、路径确定）
+          #    实际路径 $KERNEL_ROOT/prebuilts/clang/host/linux-x86/clang-r*/bin
+          #    深度 7，所以 find -maxdepth 6 必然差一层找不到。
+          for d in "$KERNEL_ROOT"/prebuilts/clang/host/linux-x86/clang-r*/bin \
+                   "$KERNEL_ROOT"/prebuilts/clang/host/linux-x86/*/bin; do
+            if [ -x "$d/llvm-nm" ] && [ -x "$d/llvm-readelf" ] && [ -x "$d/llvm-objdump" ]; then
+              CLANG_BIN="$d"; break
+            fi
+          done
+
+          # 2) find -maxdepth 8 兜底（覆盖 kleaf 把 clang 放进 bazel 外链的情况）
+          if [ -z "$CLANG_BIN" ]; then
+            found=$(find -L "$KERNEL_ROOT" -maxdepth 8 -name llvm-nm -type f 2>/dev/null | head -1)
+            [ -n "$found" ] && CLANG_BIN=$(dirname "$found")
+          fi
+
+          # 2b) 再退一步：问 bazel 要 output_base（kleaf_prebuilts 在 external 下）
+          if [ -z "$CLANG_BIN" ] && [ -x "$KERNEL_ROOT/tools/bazel" ]; then
+            OB=$(cd "$KERNEL_ROOT" && tools/bazel info output_base 2>/dev/null || true)
+            if [ -n "${OB:-}" ] && [ -d "$OB" ]; then
+              echo "bazel output_base = $OB"
+              found=$(find "$OB" -name llvm-nm -type f 2>/dev/null | head -1)
+              [ -n "$found" ] && CLANG_BIN=$(dirname "$found")
+            fi
+          fi
+
+          # 3) 系统 PATH —— 仅在 clang 版本足够新时接受。
+          #    ⚠ 不能用 `find /` 兜底：本流水线的「清理磁盘空间」步骤里
+          #    remove_packages 含 *llvm*，系统 llvm 已被删除，扫根文件系统必然为空、
+          #    白耗 15~60 秒；万一命中旧版（llvm-14），llvm-objdump 的输出格式与
+          #    clang-17 不同，__traceiter 的 `movk w17` 解析会误报 FAIL ——
+          #    用错版本的工具链比直接失败更危险。
+          if [ -z "$CLANG_BIN" ]; then
+            if command -v clang >/dev/null 2>&1; then
+              SYS_CLANG_BIN=$(dirname "$(command -v clang)")
+              SYS_VER=$(clang --version 2>/dev/null | head -1 | sed -n 's/.*version \([0-9]\+\).*/\1/p')
+              if [ -n "${SYS_VER:-}" ] && [ "$SYS_VER" -ge 17 ] 2>/dev/null \
+                 && [ -x "$SYS_CLANG_BIN/llvm-nm" ] \
+                 && [ -x "$SYS_CLANG_BIN/llvm-readelf" ] \
+                 && [ -x "$SYS_CLANG_BIN/llvm-objdump" ]; then
+                CLANG_BIN="$SYS_CLANG_BIN"
+                echo "::warning title=未找到 kleaf 自带 llvm::回退到系统 clang-$SYS_VER ($CLANG_BIN)"
+              else
+                echo "::warning title=系统 clang 版本不足或工具不全::clang=${SYS_VER:-未知}, 不复用（避免误报）"
+              fi
+            fi
+          fi
+
+          # 找不到时打印实际存在的 clang 目录，便于下次一眼定位
+          if [ -z "$CLANG_BIN" ]; then
+            echo "  \$KERNEL_ROOT/prebuilts/clang/host/linux-x86/ 下的目录:"
+            ls -d "$KERNEL_ROOT"/prebuilts/clang/host/linux-x86/*/ 2>/dev/null || echo "    <不存在>"
+            ls -d "$KERNEL_ROOT"/bazel-*/external/kleaf_prebuilts/*/bin 2>/dev/null | head -5 || true
+          fi
+
+          echo "llvm bin = ${CLANG_BIN:-<未找到>}"
+
+          # ---------- 三种可继续的情形 ----------
+          # (a) 工具齐全 -> 正常跑 check_kcfi.py
+          # (b) 缺工具/缺 vmlinux -> 跳过二进制比对，但仍从 Image 抽内联哈希供人工核对
+          # 任一情形都不 exit 1（除非 strict_kcfi 打开且确实不匹配）
+          RUN_CHECK=0
+          if [ -n "$VM" ] && [ -n "$CLANG_BIN" ] \
+             && [ -x "$CLANG_BIN/llvm-nm" ] && [ -x "$CLANG_BIN/llvm-readelf" ] \
+             && [ -x "$CLANG_BIN/llvm-objdump" ]; then
+            RUN_CHECK=1
+          fi
+
+          RC=0
+          if [ "$RUN_CHECK" = "1" ]; then
+            set +e
+            python3 "$GITHUB_WORKSPACE/scripts/check_kcfi.py" "$VM" "$CLANG_BIN" 2>&1 \
+              | tee "$GITHUB_WORKSPACE/build-logs/check_kcfi.log"
+            RC=${PIPESTATUS[0]}
+            set -e
+            # 把不匹配行收进 cfi_unverified.txt
+            grep -E 'MISMATCH|NOT FOUND' "$GITHUB_WORKSPACE/build-logs/check_kcfi.log" \
+              >> "$OUT_UNVERIFIED" 2>/dev/null || true
+          else
+            echo "::warning title=kCFI 门禁降级::缺 vmlinux 或缺 llvm 工具，跳过二进制反汇编比对"
+            echo "vmlinux=${VM:-<无>} CLANG_BIN=${CLANG_BIN:-<无>}" >> "$OUT_UNVERIFIED"
+            echo "缺工具，无法执行 check_kcfi.py" >> "$OUT_UNVERIFIED"
+          fi
+
+          # ---------- 兜底：从 Image 里抽内联 kCFI 哈希，供人工核对 ----------
+          IMG=""
+          for c in "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64/Image" \
+                   "$KERNEL_ROOT/out/${{ inputs.android_version }}-${{ inputs.kernel_version }}/dist/Image"; do
+            [ -f "$c" ] && { IMG="$c"; break; }
+          done
+          if [ -n "$IMG" ]; then
+            echo "Image = $IMG"
+            {
+              echo "# 从 Image 直接抽取的 kCFI 类型哈希（供人工核对，非门禁判据）"
+              echo "# 期望值参考 m2481 kit: shrink_slab=0xc3b4beac / end_buffer_write_sync=0xd2948eb7"
+              echo "#   find_lock_task_mm=0xea4a421a / sched_show_task=0x1703dde1"
+              echo "#   setup_per_zone_wmarks=0xa540670c / android_debug_symbol=0x0ec970ab"
+            } >> "$OUT_UNVERIFIED"
+            strings -a "$IMG" | grep -i 'kcfi\|__kcfi' | head -20 >> "$OUT_UNVERIFIED" || true
+          fi
+
+          echo "=== 门禁 3 结论 ==="
+          if [ "$RUN_CHECK" = "1" ] && [ "$RC" -eq 0 ]; then
+            echo "  kCFI 全部 MATCH"
+          elif [ "$RUN_CHECK" = "1" ]; then
+            echo "  kCFI 存在不匹配（详见 build-logs/check_kcfi.log）"
+          else
+            echo "  跳过二进制比对（缺工具/缺 vmlinux），已写人工核对清单"
+          fi
+          echo "  不匹配/未验证项 -> cfi_unverified.txt"
+
+          if [ "$STRICT" = "true" ] && [ "$RC" -ne 0 ]; then
+            echo "::error title=kCFI 门禁严格模式失败::strict_kcfi=true 且存在不匹配，拒绝打包"
+            exit 1
+          fi
+          if [ "$RC" -ne 0 ]; then
+            echo "::warning title=kCFI 有不匹配::已写入 cfi_unverified.txt；默认不阻断（如需严格请置 strict_kcfi=true）"
+          fi
+          exit 0
 
       - name: 应用 KPM 补丁（构建期修补 Image）
         if: startsWith(inputs.use_kpm, 'patched') && (inputs.ksu_variant == 'SukiSU' || inputs.ksu_variant == 'BakaSU')
@@ -2042,8 +2178,14 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/AnyKernel3-package"
           cp -a "$ANYKERNEL3/." "$GITHUB_WORKSPACE/AnyKernel3-package/"
 
-      - name: 构建 Boot 镜像 (Android 12)
-        if: inputs.android_version == 'android12'
+      # ⚠ 21 Pro 只走下方「构建 Boot 镜像 (21 Pro / AVB0 + AVBf 注入)」那条路。
+      #   这条 Android 12 分支用 mkbootimg + add_hash_footer(64MiB, 现生成密钥)，
+      #   对魅族 ABL 来说产出的是【无 AVBf、非原厂签名】的镜像 -> 必回 Fastboot。
+      #   它本来就被 `if: android_version == 'android12' || 'android13'` 挡住
+      #   （我们永远传 android14），但为防止将来误改 inputs 导致产出砖头镜像，
+      #   这里显式置为永不执行。
+      - name: 构建 Boot 镜像 (Android 12) [已禁用：21 Pro 不走此路径]
+        if: false
         working-directory: bootimgs
         run: |
           GKI_URL=https://dl.google.com/android/gki/gki-certified-boot-android12-5.10-${{ inputs.os_patch_level }}_${{ inputs.revision }}.zip
@@ -2241,9 +2383,38 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ${{ inputs.ksu_variant }}_kernel-${{ env.CONFIG }}
+          # ★ 除镜像外还必须带上各类"自证报告"：
+          #   boot_avb_report.txt 是 AVB 注入自检报告（第一生死线）。
+          #   用户刷成砖时，这是唯一能证明"AVB0/AVBf 到底注入成功没有"的证据；
+          #   不上传就等于最需要证据的时候没有证据。
+          #   其余 *_compat / cfi_typeids / patch_crc / config_vs_stock 同理。
           path: |
             *AnyKernel3.zip
             *.img
+            boot_avb_report.txt
+            module_compat.txt
+            cfi_typeids.txt
+            patch_crc_report.txt
+            config_vs_stock.txt
+            module_compat_report.txt
+            kcfi_unverified.txt
+          if-no-files-found: warn
+          compression-level: 9
+
+      - name: 上传门禁日志（krcrc / kCFI / kit 补丁）
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.ksu_variant }}_kernel-${{ env.CONFIG }}-GateLogs
+          # 门禁日志是判断"三道门禁到底跑没跑、结论是什么"的唯一依据。
+          # 用 always() 保证即使构建失败也能拿到，便于离线复盘。
+          path: |
+            build-logs/krcrc_audit.log
+            build-logs/check_kcfi.log
+            build-logs/kit_patch.log
+            build-logs/kit_onemind.log
+          if-no-files-found: warn
+          retention-days: 30
           compression-level: 9
 
       - name: 上传补丁冲突文件

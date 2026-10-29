@@ -282,11 +282,42 @@ jobs:
           echo "== 产物目录结构 =="
           find ./artifacts -type f | sort
 
-          # 内核产物与 APK 平铺到 publish/
-          find ./artifacts -type f \
-            \( -name '*.img' -o -name '*.zip' -o -name '*.apk' \
-               -o -name '*.txt' -o -name '*.log' -o -name '*.report' \) \
-            -exec cp -v {} publish/ \;
+          # ---- P1-3: 管理器 APK 必须唯一 ----
+          #   manager-apk artifact 里若出现多个 apk（上游发多架构包 / 打包出错），
+          #   平铺后会把多个 apk 一起发出去，用户装错就管理器认不到内核
+          #   （内核里编的是某一个特定证书的哈希）。
+          if [ -d ./artifacts/manager-apk ]; then
+            mapfile -t APK_LIST < <(find ./artifacts/manager-apk -maxdepth 1 -name '*.apk' -type f | sort)
+            echo "manager-apk 里的 apk 数量: ${#APK_LIST[@]}"
+            printf '  %s\n' "${APK_LIST[@]}"
+            if [ "${#APK_LIST[@]}" -gt 1 ]; then
+              echo "::error title=管理器 APK 不唯一::manager-apk artifact 里有 ${#APK_LIST[@]} 个 apk，无法确定该发哪一个（内核只认其中一个的证书）"
+              exit 1
+            fi
+            if [ "${#APK_LIST[@]}" -eq 0 ]; then
+              echo "::error title=管理器 APK 缺失::manager-apk artifact 里没有 apk"
+              exit 1
+            fi
+          else
+            echo "::warning title=缺少 manager-apk artifact::发布集将不含管理器 APK"
+          fi
+
+          # ---- P1-2: 平铺时检测同名冲突（不再静默覆盖）----
+          COPY_N=0
+          CONFLICT=0
+          while IFS= read -r -d '' f; do
+            base=$(basename "$f")
+            if [ -e "publish/$base" ]; then
+              echo "::warning title=产物同名冲突::$base 来自 $(dirname "$f") 覆盖了先前的同名文件（内容可能不同）"
+              CONFLICT=$((CONFLICT + 1))
+            fi
+            cp -v "$f" "publish/$base"
+            COPY_N=$((COPY_N + 1))
+          done < <(find ./artifacts -type f \
+                     \( -name '*.img' -o -name '*.zip' -o -name '*.apk' \
+                        -o -name '*.txt' -o -name '*.log' -o -name '*.report' \) \
+                     -print0)
+          echo "平铺文件数: $COPY_N，同名冲突: $CONFLICT"
 
           # ★ 硬校验：APK 必须在最终发布集里（用户要求"把编译时用的 APK 一起上传"）
           if [ -z "${APK_NAME:-}" ] || [ ! -f "publish/${APK_NAME}" ]; then

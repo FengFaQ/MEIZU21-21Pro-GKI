@@ -4,66 +4,128 @@
 # Modules: 57    Total size: 7168825 bytes (6.8 MiB)
 # Module directory /lib/modules/6.1.25-android14-11-maybe-dirty/ MUST match `uname -r`,
 # otherwise none of these 57 modules can be found at boot.
+#
+# 注意: 本文件由 scripts 从原厂 system_dlkm.img 解包目录生成。
+#   modules.load 位于 lib/modules/<kernel-release>/modules.load（多一层版本目录），
+#   不是 lib/modules/modules.load（vendor_dlkm 才是平铺的）。
 
 # ==================== modules.load (load order) ====================
-# format: <index> <TAB> <name>.ko
+# format: <index> <TAB> <path>.ko
+# 这 57 个模块由 init 按此顺序加载；清单为空 = 全部不加载。
+1	kernel/kernel/kheaders.ko
+2	kernel/lib/crypto/libarc4.ko
+3	kernel/drivers/net/mii.ko
+4	kernel/drivers/net/can/dev/can-dev.ko
+5	kernel/drivers/net/can/vcan.ko
+6	kernel/drivers/net/can/slcan/slcan.ko
+7	kernel/drivers/net/ppp/ppp_generic.ko
+8	kernel/drivers/net/ppp/bsd_comp.ko
+9	kernel/drivers/net/ppp/ppp_deflate.ko
+10	kernel/drivers/net/ppp/ppp_mppe.ko
+11	kernel/drivers/net/ppp/pppox.ko
+12	kernel/drivers/net/ppp/pptp.ko
+13	kernel/drivers/net/slip/slhc.ko
+14	kernel/drivers/net/wwan/wwan.ko
+15	kernel/drivers/net/usb/rtl8150.ko
+16	kernel/drivers/net/usb/r8152.ko
+17	kernel/drivers/net/usb/asix.ko
+18	kernel/drivers/net/usb/ax88179_178a.ko
+19	kernel/drivers/net/usb/cdc_ether.ko
+20	kernel/drivers/net/usb/cdc_eem.ko
+21	kernel/drivers/net/usb/usbnet.ko
+22	kernel/drivers/net/usb/cdc_ncm.ko
+23	kernel/drivers/net/usb/aqc111.ko
+24	kernel/drivers/net/usb/r8153_ecm.ko
+25	kernel/drivers/usb/class/cdc-acm.ko
+26	kernel/drivers/usb/serial/usbserial.ko
+27	kernel/drivers/usb/serial/ftdi_sio.ko
+28	kernel/drivers/bluetooth/hci_uart.ko
+29	kernel/drivers/bluetooth/btsdio.ko
+30	kernel/drivers/bluetooth/btbcm.ko
+31	kernel/drivers/bluetooth/btqca.ko
+32	kernel/net/8021q/8021q.ko
+33	kernel/net/can/can.ko
+34	kernel/net/can/can-raw.ko
+35	kernel/net/can/can-bcm.ko
+36	kernel/net/can/can-gw.ko
+37	kernel/net/bluetooth/bluetooth.ko
+38	kernel/net/bluetooth/rfcomm/rfcomm.ko
+39	kernel/net/bluetooth/hidp/hidp.ko
+40	kernel/net/l2tp/l2tp_core.ko
+41	kernel/net/l2tp/l2tp_ppp.ko
+42	kernel/net/tipc/tipc.ko
+43	kernel/net/tipc/diag.ko
+44	kernel/net/rfkill/rfkill.ko
+45	kernel/net/6lowpan/6lowpan.ko
+46	kernel/net/6lowpan/nhc_dest.ko
+47	kernel/net/6lowpan/nhc_fragment.ko
+48	kernel/net/6lowpan/nhc_hop.ko
+49	kernel/net/6lowpan/nhc_ipv6.ko
+50	kernel/net/6lowpan/nhc_mobility.ko
+51	kernel/net/6lowpan/nhc_routing.ko
+52	kernel/net/6lowpan/nhc_udp.ko
+53	kernel/net/ieee802154/6lowpan/ieee802154_6lowpan.ko
+54	kernel/net/ieee802154/ieee802154.ko
+55	kernel/net/ieee802154/ieee802154_socket.ko
+56	kernel/net/mac802154/mac802154.ko
+57	kernel/net/nfc/nfc.ko
 
 # ==================== all modules (path<TAB>bytes) ====================
-# "loaded" marks modules present in modules.load.
--	49537	6.1.25-android14-11-maybe-dirty/kernel/drivers/bluetooth/btbcm.ko
--	42793	6.1.25-android14-11-maybe-dirty/kernel/drivers/bluetooth/btqca.ko
--	60481	6.1.25-android14-11-maybe-dirty/kernel/drivers/bluetooth/btsdio.ko
--	263305	6.1.25-android14-11-maybe-dirty/kernel/drivers/bluetooth/hci_uart.ko
--	98609	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/can/dev/can-dev.ko
--	79417	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/can/slcan/slcan.ko
--	61289	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/can/vcan.ko
--	30545	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/mii.ko
--	21425	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/bsd_comp.ko
--	22433	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/ppp_deflate.ko
--	157017	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/ppp_generic.ko
--	24865	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/ppp_mppe.ko
--	64009	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/pppox.ko
--	66881	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/pptp.ko
--	20529	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/slip/slhc.ko
--	90953	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/aqc111.ko
--	126889	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/asix.ko
--	100025	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/ax88179_178a.ko
--	49073	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/cdc_eem.ko
--	45265	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/cdc_ether.ko
--	96089	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/cdc_ncm.ko
--	253929	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/r8152.ko
--	47705	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/r8153_ecm.ko
--	67857	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/rtl8150.ko
--	115481	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/usbnet.ko
--	100065	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/wwan/wwan.ko
--	77561	6.1.25-android14-11-maybe-dirty/kernel/drivers/usb/class/cdc-acm.ko
--	161617	6.1.25-android14-11-maybe-dirty/kernel/drivers/usb/serial/ftdi_sio.ko
--	88545	6.1.25-android14-11-maybe-dirty/kernel/drivers/usb/serial/usbserial.ko
--	169449	6.1.25-android14-11-maybe-dirty/kernel/kernel/kheaders.ko
--	10961	6.1.25-android14-11-maybe-dirty/kernel/lib/crypto/libarc4.ko
--	52249	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/6lowpan.ko
--	12057	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_dest.ko
--	12065	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_fragment.ko
--	12057	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_hop.ko
--	11993	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_ipv6.ko
--	12065	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_mobility.ko
--	12065	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_routing.ko
--	15489	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_udp.ko
--	113865	6.1.25-android14-11-maybe-dirty/kernel/net/8021q/8021q.ko
--	1386777	6.1.25-android14-11-maybe-dirty/kernel/net/bluetooth/bluetooth.ko
--	132673	6.1.25-android14-11-maybe-dirty/kernel/net/bluetooth/hidp/hidp.ko
--	237721	6.1.25-android14-11-maybe-dirty/kernel/net/bluetooth/rfcomm/rfcomm.ko
--	95793	6.1.25-android14-11-maybe-dirty/kernel/net/can/can-bcm.ko
--	82977	6.1.25-android14-11-maybe-dirty/kernel/net/can/can-gw.ko
--	83737	6.1.25-android14-11-maybe-dirty/kernel/net/can/can-raw.ko
--	97545	6.1.25-android14-11-maybe-dirty/kernel/net/can/can.ko
--	64297	6.1.25-android14-11-maybe-dirty/kernel/net/ieee802154/6lowpan/ieee802154_6lowpan.ko
--	295977	6.1.25-android14-11-maybe-dirty/kernel/net/ieee802154/ieee802154.ko
--	74481	6.1.25-android14-11-maybe-dirty/kernel/net/ieee802154/ieee802154_socket.ko
--	149657	6.1.25-android14-11-maybe-dirty/kernel/net/l2tp/l2tp_core.ko
--	111089	6.1.25-android14-11-maybe-dirty/kernel/net/l2tp/l2tp_ppp.ko
--	246105	6.1.25-android14-11-maybe-dirty/kernel/net/mac802154/mac802154.ko
--	233089	6.1.25-android14-11-maybe-dirty/kernel/net/nfc/nfc.ko
--	63809	6.1.25-android14-11-maybe-dirty/kernel/net/rfkill/rfkill.ko
--	14745	6.1.25-android14-11-maybe-dirty/kernel/net/tipc/diag.ko
--	879849	6.1.25-android14-11-maybe-dirty/kernel/net/tipc/tipc.ko
+# "loaded" 列: Y = 在 modules.load 里（会被加载），- = 不在（不会自动加载）
+Y	49537	kernel/drivers/bluetooth/btbcm.ko
+Y	42793	kernel/drivers/bluetooth/btqca.ko
+Y	60481	kernel/drivers/bluetooth/btsdio.ko
+Y	263305	kernel/drivers/bluetooth/hci_uart.ko
+Y	98609	kernel/drivers/net/can/dev/can-dev.ko
+Y	79417	kernel/drivers/net/can/slcan/slcan.ko
+Y	61289	kernel/drivers/net/can/vcan.ko
+Y	30545	kernel/drivers/net/mii.ko
+Y	21425	kernel/drivers/net/ppp/bsd_comp.ko
+Y	22433	kernel/drivers/net/ppp/ppp_deflate.ko
+Y	157017	kernel/drivers/net/ppp/ppp_generic.ko
+Y	24865	kernel/drivers/net/ppp/ppp_mppe.ko
+Y	64009	kernel/drivers/net/ppp/pppox.ko
+Y	66881	kernel/drivers/net/ppp/pptp.ko
+Y	20529	kernel/drivers/net/slip/slhc.ko
+Y	90953	kernel/drivers/net/usb/aqc111.ko
+Y	126889	kernel/drivers/net/usb/asix.ko
+Y	100025	kernel/drivers/net/usb/ax88179_178a.ko
+Y	49073	kernel/drivers/net/usb/cdc_eem.ko
+Y	45265	kernel/drivers/net/usb/cdc_ether.ko
+Y	96089	kernel/drivers/net/usb/cdc_ncm.ko
+Y	253929	kernel/drivers/net/usb/r8152.ko
+Y	47705	kernel/drivers/net/usb/r8153_ecm.ko
+Y	67857	kernel/drivers/net/usb/rtl8150.ko
+Y	115481	kernel/drivers/net/usb/usbnet.ko
+Y	100065	kernel/drivers/net/wwan/wwan.ko
+Y	77561	kernel/drivers/usb/class/cdc-acm.ko
+Y	161617	kernel/drivers/usb/serial/ftdi_sio.ko
+Y	88545	kernel/drivers/usb/serial/usbserial.ko
+Y	169449	kernel/kernel/kheaders.ko
+Y	10961	kernel/lib/crypto/libarc4.ko
+Y	52249	kernel/net/6lowpan/6lowpan.ko
+Y	12057	kernel/net/6lowpan/nhc_dest.ko
+Y	12065	kernel/net/6lowpan/nhc_fragment.ko
+Y	12057	kernel/net/6lowpan/nhc_hop.ko
+Y	11993	kernel/net/6lowpan/nhc_ipv6.ko
+Y	12065	kernel/net/6lowpan/nhc_mobility.ko
+Y	12065	kernel/net/6lowpan/nhc_routing.ko
+Y	15489	kernel/net/6lowpan/nhc_udp.ko
+Y	113865	kernel/net/8021q/8021q.ko
+Y	1386777	kernel/net/bluetooth/bluetooth.ko
+Y	132673	kernel/net/bluetooth/hidp/hidp.ko
+Y	237721	kernel/net/bluetooth/rfcomm/rfcomm.ko
+Y	95793	kernel/net/can/can-bcm.ko
+Y	82977	kernel/net/can/can-gw.ko
+Y	83737	kernel/net/can/can-raw.ko
+Y	97545	kernel/net/can/can.ko
+Y	64297	kernel/net/ieee802154/6lowpan/ieee802154_6lowpan.ko
+Y	295977	kernel/net/ieee802154/ieee802154.ko
+Y	74481	kernel/net/ieee802154/ieee802154_socket.ko
+Y	149657	kernel/net/l2tp/l2tp_core.ko
+Y	111089	kernel/net/l2tp/l2tp_ppp.ko
+Y	246105	kernel/net/mac802154/mac802154.ko
+Y	233089	kernel/net/nfc/nfc.ko
+Y	63809	kernel/net/rfkill/rfkill.ko
+Y	14745	kernel/net/tipc/diag.ko
+Y	879849	kernel/net/tipc/tipc.ko
