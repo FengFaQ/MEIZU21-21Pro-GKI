@@ -292,6 +292,18 @@ jobs:
       # 设备事实目录固定（单机型）。若以后要支持第二机型（21 / M2461），
       # 再把它改成 dispatch input 并相应精简其它 input。
       device_dir: 'device/meizu21pro'
+      # TRIM_UNUSED_KSYMS 默认 n（不裁剪）。
+      # run#23 实测：=y + 白名单会在 kleaf 的
+      #   Checking for kmi_symbol_list_strict_mode ... failed
+      #   Symbols missing from the ksymtab: ___update_load_avg / __bforget / ...
+      # 挂掉，因为 trim 与 strict_mode 语义天然冲突（trim 裁掉"没被引用"的符号，
+      # 而 strict_mode 要求 __ksymtab 完全等于 KMI 清单）。
+      # =n 的代价只是导出符号比原厂多，而模块加载只检查它 NEED 的符号
+      # 是否存在且 CRC 匹配，不关心内核多导出什么（21 线 run 26 已实证）。
+      # 真正的 CRC 保障在编译后门禁 2：二进制层覆写 __kcrctab。
+      trim_unused_ksyms: 'n'
+      # kCFI 门禁默认只告警（kCFI 部分不匹配仍可能能开机，先产出镜像让用户试刷）
+      strict_kcfi: false
 
   # ==========================================================================
   # job3: 发布 —— 内核产物 + 这版 GKI 所用的 APK 一起上传

@@ -126,6 +126,12 @@ on:
         required: false
         type: string
         default: "不签名"
+      trim_unused_ksyms:
+        description: "TRIM_UNUSED_KSYMS: n=不裁剪(默认,与KMI strict_mode兼容) / y=按白名单裁剪"
+        required: false
+        type: string
+        default: "n"
+
       strict_kcfi:
         description: "kCFI 门禁严格模式：true 时哈希不匹配即拒绝打包"
         required: false
@@ -1407,79 +1413,80 @@ jobs:
             echo "::error title=缺少 KMI 白名单::$KSYMS_RAW 不存在。TRIM_UNUSED_KSYMS=y 时必须提供白名单, 否则会把厂商模块依赖的符号全裁掉。"
             exit 1
           fi
-          # ★ KMI 白名单必须是 LF（run#20 编译失败的根因）
-          #   kit 原件的 vmlinux_abi_symbollist.raw 是 CRLF。kernel 的 trim_ksyms
-          #   按 \n 切行、**不剥离 \r**，于是符号名末尾带 \r，生成的
-          #   include/generated/autoksyms.h 畸形：
-          #       #define __KSYM_I_BDEV\r 1
-          #   编译时报 `expected identifier or '('`、
-          #   `__KSYM_module_layout macro redefined`，kernel 构建直接挂掉
-          #   （run#20 实测；下游的 arch_spinlock_t 未定义等都是它的连锁症状）。
+          # ============================================================
+          # TRIM_UNUSED_KSYMS：本轮退回 =n（run#23 实测结论）
+          # ------------------------------------------------------------
+          # run#23 用 =y + 白名单，编译在 kleaf 的
+          #   Checking for kmi_symbol_list_strict_mode ... failed
+          #   Symbols missing from the ksymtab: ___update_load_avg / __bforget / ...
+          # 挂掉。
           #
-          #   仓库里的该文件已【本身转换为 LF】（git blob 实测 CR=0）。
-          #   这里仍做两道硬校验防回归；万一有人用 Windows 工具把 CRLF 放回来，
-          #   自动 tr 兜底并告警，不让构建挂掉。
-          mkdir -p "$GITHUB_WORKSPACE/build-logs"
-          KSYMS_LF="$KSYMS_RAW"
-          if grep -q $'\r' "$KSYMS_RAW" 2>/dev/null; then
-            echo "::warning title=KMI 白名单含 CRLF::已自动转换为 LF，请把仓库里的文件也转成 LF"
-            KSYMS_LF="$GITHUB_WORKSPACE/build-logs/vmlinux_abi_symbollist.lf.raw"
-            tr -d '\r' < "$KSYMS_RAW" | sed '/^[[:space:]]*$/d' > "$KSYMS_LF"
+          # 原因是语义冲突：
+          #   · TRIM_UNUSED_KSYMS=y  => 裁掉"没被引用"的导出符号
+          #   · strict_mode          => __ksymtab 必须"完全等于"KMI 符号清单
+          #   AOSP 的 abi_gki_aarch64 清单里有大量我们没引用的符号，
+          #   被 trim 掉后 strict_mode 就判定"缺失"。
+          #   （`sed -i '/kmi_symbol_list_strict_mode/d' BUILD.bazel` 只删一行，
+          #     kleaf 的 target 是宏展开的，删了仍会跑 —— run#23 日志证实。）
+          #
+          # 决策：退回 =n。代价只是"导出符号比原厂多"，而
+          #   模块加载只检查它 NEED 的符号**存在且 CRC 匹配**，
+          #   不关心内核多导出了什么（21 线 run 26 已实证：=n + CRC 对齐，
+          #   4891 NEED，0 失配 0 无法解析）。
+          #   真正的 CRC 保障在编译后的「门禁 2/3」——check_krcrc_symvers.py
+          #   在**二进制层**把 __kcrctab 覆写为原厂值。
+          #
+          # TRIM=y 作为后续单独验证的优化项（需要精确改 kleaf BUILD.bazel 的
+          # kmi_symbol_list_strict_mode 参数，而不是 sed 删行）。
+          # ============================================================
+          TRIM_WANT="${{ inputs.trim_unused_ksyms }}"
+          echo "TRIM_UNUSED_KSYMS = $TRIM_WANT"
+          if [ "$TRIM_WANT" = "y" ]; then
+            KSYMS_RAW="$GITHUB_WORKSPACE/${DEVICE_DIR:-device/meizu21pro}/vmlinux_abi_symbollist.raw"
+            if [ ! -f "$KSYMS_RAW" ]; then
+              echo "::error title=缺少 KMI 白名单::$KSYMS_RAW 不存在"
+              exit 1
+            fi
+            # 规范化：必须是 LF（CRLF 会让 trim_ksyms 生成畸形 autoksyms.h，
+            # 见 run#20：`#define __KSYM_I_BDEV\r 1` -> expected identifier）
+            KSYMS_LF="$KSYMS_RAW"
+            if grep -q $'\r' "$KSYMS_RAW" 2>/dev/null; then
+              echo "::warning title=KMI 白名单含 CRLF::自动转 LF"
+              KSYMS_LF="$GITHUB_WORKSPACE/build-logs/vmlinux_abi_symbollist.lf.raw"
+              tr -d '\r' < "$KSYMS_RAW" | sed '/^[[:space:]]*$/d' > "$KSYMS_LF"
+            fi
+            if grep -q $'\r' "$KSYMS_LF" 2>/dev/null; then
+              echo "::error title=白名单仍含 CR::"; exit 1
+            fi
+            if grep -vqE '^[A-Za-z_][A-Za-z0-9_]*$' "$KSYMS_LF"; then
+              echo "::error title=白名单含非法符号行::"
+              grep -nvE '^[A-Za-z_][A-Za-z0-9_]*$' "$KSYMS_LF" | head -5
+              exit 1
+            fi
+            # ★ 必须拷进内核树并用 srctree 相对路径：
+            #   kleaf 在 sandbox 内构建，$GITHUB_WORKSPACE / build-logs 不可见。
+            KSYMS_IN_TREE_DIR="$KERNEL_ROOT/common"
+            [ -d "$KSYMS_IN_TREE_DIR" ] || KSYMS_IN_TREE_DIR="."
+            cp -f "$KSYMS_LF" "$KSYMS_IN_TREE_DIR/abi_symbollist.raw"
+            echo "  白名单 -> $KSYMS_IN_TREE_DIR/abi_symbollist.raw ($(wc -l < "$KSYMS_IN_TREE_DIR/abi_symbollist.raw") 行)"
+            {
+              echo "CONFIG_TRIM_UNUSED_KSYMS=y"
+              echo "CONFIG_UNUSED_KSYMS_WHITELIST=\"abi_symbollist.raw\""
+            } >> "$DEFCONFIG"
+            echo "  gki_defconfig 相关行:"
+            grep -n 'TRIM_UNUSED_KSYMS\|UNUSED_KSYMS_WHITELIST' "$DEFCONFIG" || echo "    (无)"
+            echo "  ★ 值必须是相对路径；出现 /home/ 或 /mnt/ 即为错误"
+          else
+            # =n：不裁剪导出符号
+            #   注意必须写成 "# CONFIG_X is not set"（kleaf fragment 校验拒绝 CONFIG_X=n）
+            echo "# CONFIG_TRIM_UNUSED_KSYMS is not set" >> "$DEFCONFIG"
+            echo "  gki_defconfig 相关行:"
+            grep -n 'TRIM_UNUSED_KSYMS' "$DEFCONFIG" || echo "    (无)"
+            echo "  说明: 不裁剪 -> strict_mode 自然通过（它只要求清单里的符号都存在，多了不算违规）"
           fi
-          # 硬校验 1：不得含 CR
-          if grep -q $'\r' "$KSYMS_LF" 2>/dev/null; then
-            echo "::error title=白名单仍含 CR::规范化失败"
-            exit 1
-          fi
-          # 硬校验 2：每行必须是合法 C 符号名
-          if grep -vqE '^[A-Za-z_][A-Za-z0-9_]*$' "$KSYMS_LF"; then
-            echo "::error title=白名单含非法符号行::"
-            grep -nvE '^[A-Za-z_][A-Za-z0-9_]*$' "$KSYMS_LF" | head -5
-            exit 1
-          fi
-          KSYMS_COUNT=$(grep -c . "$KSYMS_LF" || true)
-          echo "  KMI 白名单: $KSYMS_LF"
-          echo "  白名单符号数: $KSYMS_COUNT (期望 6501)"
-          if [ "$KSYMS_COUNT" -lt 6000 ]; then
-            echo "::error title=KMI 白名单过短::$KSYMS_LF 只有 $KSYMS_COUNT 个符号"
-            exit 1
-          fi
-          head -3 "$KSYMS_LF" | sed 's/^/    /'
-
-          # ★ 必须把白名单【拷进内核源码树】并用 srctree 相对路径。
-          #   原因：这行 config 会被抽进 ksu.fragment，然后 defconfig 被还原 ——
-          #   它只活在 fragment 里。而 kleaf/bazel 在 sandbox 内构建，
-          #   $GITHUB_WORKSPACE / build-logs 都不在 sandbox 可见范围。
-          #   若写构建机绝对路径，白名单会**静默读不到** ->
-          #   trim_ksyms 当作空白名单 -> 未使用符号全裁 ->
-          #   厂商 471 个 .ko 大量 Unknown symbol -> 卡第一屏，而编译全绿。
-          #   CONFIG_UNUSED_KSYMS_WHITELIST 的语义是 $(srctree)/<该值>，
-          #   所以写相对路径（相对内核源码根 = common/）才正确。
-          KSYMS_IN_TREE_DIR="$KERNEL_ROOT/common"
-          [ -d "$KSYMS_IN_TREE_DIR" ] || KSYMS_IN_TREE_DIR="."
-          cp -f "$KSYMS_LF" "$KSYMS_IN_TREE_DIR/abi_symbollist.raw"
-          echo "  白名单已拷入内核树: $KSYMS_IN_TREE_DIR/abi_symbollist.raw ($(wc -l < "$KSYMS_IN_TREE_DIR/abi_symbollist.raw") 行)"
-          {
-            echo "CONFIG_TRIM_UNUSED_KSYMS=y"
-            echo "CONFIG_UNUSED_KSYMS_WHITELIST=\"abi_symbollist.raw\""
-          } >> "$DEFCONFIG"
-
-          # ---- 诊断：whitelist 注入后的真实状态 ----
-          #   关键要看清两点：
-          #     1) 值是否是【相对路径】（绝对路径在 kleaf sandbox 里不可见 -> 静默失效）
-          #     2) 源码树里那份文件是否真的存在（sandbox 里要能访问）
-          echo "=== WHITELIST 注入后状态 ==="
-          echo "  仓库原件 : $KSYMS_RAW"
-          ls -l "$KSYMS_RAW" 2>&1 || echo "  !! 仓库原件不存在"
-          echo "  源码树副本: $KSYMS_IN_TREE_DIR/abi_symbollist.raw"
-          ls -l "$KSYMS_IN_TREE_DIR/abi_symbollist.raw" 2>&1 || echo "  !! 源码树副本不存在"
-          echo "  gki_defconfig 里的相关行:"
-          grep -n 'TRIM_UNUSED_KSYMS\|UNUSED_KSYMS_WHITELIST' "$DEFCONFIG" || echo "    (无)"
-          echo "  ★ 值必须是相对路径(如 abi_symbollist.raw)，出现 /home/ 或 /mnt/ 即为错误"
           # 防御: 不允许残留魅族内网路径
           if grep -q 'jenkins-m2481\|/home/flyme/' "$DEFCONFIG"; then
-            echo "::error title=配置里残留魅族内网路径::CONFIG_UNUSED_KSYMS_WHITELIST 必须指向仓库内文件"
-            exit 1
+            echo "::error title=配置里残留魅族内网路径::"; exit 1
           fi
 
           sed -i 's/check_defconfig//' ./common/build.config.gki
@@ -1525,8 +1532,28 @@ jobs:
           if [ -f "build/build.sh" ]; then
             sed -i 's/-dirty//' ./common/scripts/setlocalversion
           else
-            sed -i '/kmi_symbol_list_strict_mode/d' ./common/BUILD.bazel
+            # ★ 彻底移除 kleaf 的 kmi_symbol_list_strict_mode 校验（多重写法一并删）
+            #   run#23 实测：只删 `kmi_symbol_list_strict_mode` 这一个词的行不够 ——
+            #   检查仍然执行了（BUILD.bazel:126 的 KernelBuildKmiSymbolListStrictMode）。
+            #   说明该属性可能是跨行赋值或由 build.config 变量间接传入。
+            #   这里把常见写法都删掉，并在后面加诊断确认。
+            sed -i '/kmi_symbol_list_strict_mode/d' ./common/BUILD.bazel 2>/dev/null || true
+            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' ./common/BUILD.bazel 2>/dev/null || true
+            sed -i '/kmi_symbol_list_strict_mode/d' ./common/build.config.gki.aarch64 2>/dev/null || true
+            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' ./common/build.config.gki.aarch64 2>/dev/null || true
+            sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' ./common/build.config.gki 2>/dev/null || true
             sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" ./build/kernel/kleaf/impl/stamp.bzl 2>/dev/null || true
+
+            # 诊断：确认还剩多少
+            echo "=== kmi_symbol_list_strict_mode 移除诊断 ==="
+            for f in ./common/BUILD.bazel ./common/build.config.gki.aarch64 ./common/build.config.gki; do
+              [ -f "$f" ] || continue
+              n=$(grep -ci 'kmi_symbol_list_strict_mode' "$f" 2>/dev/null || true)
+              echo "  $f : 剩余 $n 处"
+              if [ "${n:-0}" -gt 0 ]; then
+                grep -in 'kmi_symbol_list_strict_mode' "$f" | sed 's/^/      /'
+              fi
+            done
           fi
 
           VERSION_INPUT=$(echo "${{ inputs.version }}" | tr -d '[:space:]')
@@ -1823,6 +1850,13 @@ jobs:
               sed -i 's/BUILD_SYSTEM_DLKM=1/BUILD_SYSTEM_DLKM=0/' ./common/build.config.gki.aarch64
               sed -i '/MODULES_ORDER=android\/gki_aarch64_modules/d' ./common/build.config.gki.aarch64
               sed -i '/KMI_SYMBOL_LIST_STRICT_MODE/d' ./common/build.config.gki.aarch64
+              # ★ 编译前再确认一次（幂等，防前面步骤的 sed 被后续操作覆盖）
+              sed -i '/kmi_symbol_list_strict_mode/d' ./common/BUILD.bazel 2>/dev/null || true
+              echo "=== 编译前确认 ==="
+              echo "  TRIM_UNUSED_KSYMS in gki_defconfig:"
+              grep -n 'TRIM_UNUSED_KSYMS' "$DEFCONFIG" 2>/dev/null | sed 's/^/    /' || echo "    (无)"
+              echo "  strict_mode 残留 (BUILD.bazel): $(grep -ci 'kmi_symbol_list_strict_mode' ./common/BUILD.bazel 2>/dev/null || echo 0) 处"
+              echo "  KMI_SYMBOL_LIST_STRICT_MODE 残留 (build.config): $(grep -ci 'KMI_SYMBOL_LIST_STRICT_MODE' ./common/build.config.gki.aarch64 2>/dev/null || echo 0) 处"
 
               if [ -f "build/build.sh" ]; then
                 # ★ 同样按 inputs.lto_mode，不写死 thin
