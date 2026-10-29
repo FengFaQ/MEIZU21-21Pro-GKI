@@ -1463,6 +1463,19 @@ jobs:
             echo "CONFIG_TRIM_UNUSED_KSYMS=y"
             echo "CONFIG_UNUSED_KSYMS_WHITELIST=\"abi_symbollist.raw\""
           } >> "$DEFCONFIG"
+
+          # ---- 诊断：whitelist 注入后的真实状态 ----
+          #   关键要看清两点：
+          #     1) 值是否是【相对路径】（绝对路径在 kleaf sandbox 里不可见 -> 静默失效）
+          #     2) 源码树里那份文件是否真的存在（sandbox 里要能访问）
+          echo "=== WHITELIST 注入后状态 ==="
+          echo "  仓库原件 : $KSYMS_RAW"
+          ls -l "$KSYMS_RAW" 2>&1 || echo "  !! 仓库原件不存在"
+          echo "  源码树副本: $KSYMS_IN_TREE_DIR/abi_symbollist.raw"
+          ls -l "$KSYMS_IN_TREE_DIR/abi_symbollist.raw" 2>&1 || echo "  !! 源码树副本不存在"
+          echo "  gki_defconfig 里的相关行:"
+          grep -n 'TRIM_UNUSED_KSYMS\|UNUSED_KSYMS_WHITELIST' "$DEFCONFIG" || echo "    (无)"
+          echo "  ★ 值必须是相对路径(如 abi_symbollist.raw)，出现 /home/ 或 /mnt/ 即为错误"
           # 防御: 不允许残留魅族内网路径
           if grep -q 'jenkins-m2481\|/home/flyme/' "$DEFCONFIG"; then
             echo "::error title=配置里残留魅族内网路径::CONFIG_UNUSED_KSYMS_WHITELIST 必须指向仓库内文件"
@@ -1742,6 +1755,30 @@ jobs:
             echo "::error title=OneMind Hook 缺失::mm/vmstat.c 没有 extfrag_for_order 调用点"; exit 1; }
           echo "  OK  OneMind 8 大 Hook 调用点已插入"
 
+          # ★ 防御：每个 hook 的 DECLARE_HOOK 在各头文件里必须【恰好 1 次】。
+          #   有 3 层都会往这两个头文件写声明（git apply --reject / kit 幂等脚本 /
+          #   apply_kit_onemind），任一层重复就会 clang redefinition。
+          #   run#21 实测：重复时 mm.h 报 34 条 redefinition。
+          #   这条校验很便宜，但能挡住「将来又加一层」的情况。
+          echo "=== DECLARE_HOOK 次数校验（每个必须恰好 1 次）==="
+          HOOK_DUP=0
+          for hdr in "$COMMON/include/trace/hooks/mm.h" "$COMMON/include/trace/hooks/vmscan.h"; do
+            [ -f "$hdr" ] || continue
+            for hook in extfrag_for_order tune_watermark_ratio mm_vip_alloc_harder \
+                        mm_vip_alloc_harder_stat mm_vip_kvmalloc ra_tuning_max_page \
+                        memcg_filepages_protect memcg_protect_lru_gen_add_folio; do
+              n=$(grep -c "DECLARE_HOOK(android_vh_${hook}," "$hdr" 2>/dev/null || true)
+              if [ "${n:-0}" -gt 1 ]; then
+                echo "::error title=hook 声明重复::$(basename "$hdr") 里 android_vh_${hook} 出现 ${n} 次（期望 1），会导致 redefinition"
+                HOOK_DUP=1
+              elif [ "${n:-0}" -eq 0 ]; then
+                echo "  WARN $(basename "$hdr"): android_vh_${hook} 未声明（该 hook 可能缺失）"
+              fi
+            done
+          done
+          [ "$HOOK_DUP" -eq 0 ] || exit 1
+          echo "  OK  8 个 hook 声明次数均为 1"
+
           # ---- OneMind hook 签名一致性(与 kit patch 原文逐字符比对) ----
           python3 "$GITHUB_WORKSPACE/scripts/apply_kit_onemind.py" --kernel-root "$COMMON" 2>&1 \
             | tee -a "$GITHUB_WORKSPACE/build-logs/kit_onemind.log"
@@ -1802,6 +1839,15 @@ jobs:
                 FRAG="common/arch/arm64/configs/ksu.fragment"
                 diff "$DEFCONFIG.orig" "$DEFCONFIG" | grep '^>' | sed 's/^> //; s/^[[:space:]]*//' > "$FRAG" || true
                 cp "$DEFCONFIG.orig" "$DEFCONFIG"
+                # ★ 诊断：fragment 是「唯一载体」—— defconfig 这里被还原了，
+                #   whitelist 只活在这个 fragment 里。
+                echo "=== ksu.fragment 实际内容（whitelist 的唯一载体）==="
+                cat "$FRAG" || echo "  (fragment 为空!)"
+                echo "=== fragment 里 whitelist 行 ==="
+                grep -n 'TRIM_UNUSED_KSYMS\|UNUSED_KSYMS_WHITELIST' "$FRAG" \
+                  || echo "  !! fragment 里没有 whitelist 行，trim_ksyms 将使用默认（空白名单）"
+                echo "=== 还原后的 gki_defconfig（应已无 whitelist）==="
+                grep -n 'TRIM_UNUSED_KSYMS\|UNUSED_KSYMS_WHITELIST' "$DEFCONFIG" || echo "  (已还原，符合预期)"
                 echo "=== KSU Fragment 内容 ==="
                 cat "$FRAG"
                 echo "========================="
