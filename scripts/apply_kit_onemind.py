@@ -181,12 +181,89 @@ DECLARE_HOOK(android_vh_memcg_protect_lru_gen_add_folio,
 
 
 def apply_headers(p):
-    # marker 必须与 block 内实际写入的文本一致，否则幂等判断永远失效，
-    # 重复运行会插入第二份 DECLARE_HOOK -> 编译期 redefinition 错误。
-    p.insert_before("include/trace/hooks/mm.h", MM_H_ANCHOR, MM_H_BLOCK,
-                    "#ifndef %s_MM_H" % MARK)
-    p.insert_before("include/trace/hooks/vmscan.h", VMSCAN_H_ANCHOR, VMSCAN_H_BLOCK,
-                    "#ifndef %s_VMSCAN_H" % MARK)
+    # ⚠ P0：kit 补丁本身已经往这两个头文件插了全部 8 个 DECLARE_HOOK
+    #   （见 patches/01-m2481-...patch 的 include/trace/hooks/mm.h 与 vmscan.h）。
+    #   我们若再插一份 -> **DECLARE_HOOK 重定义 -> 编译失败**。
+    #   本地 e2e 树里已确认同一文件出现两份
+    #   `DECLARE_HOOK(android_vh_extfrag_for_order`（run#20 之后的静态排查）。
+    #
+    #   因此这里是【补齐】语义，不是【无条件插入】：
+    #     · 已声明且签名与 kit 原文一致 -> 跳过（kit patch 已做对）
+    #     · 已声明但签名不对（如旧的 void *unused 占位）-> 就地替换签名
+    #     · 完全没声明 -> 插入
+    #   幂等判据用真实代码特征，不用易漂移的标记字符串。
+    _ensure_hooks(p, "include/trace/hooks/mm.h", MM_H_ANCHOR,
+                  MM_H_BLOCK, "MM_H")
+    _ensure_hooks(p, "include/trace/hooks/vmscan.h", VMSCAN_H_ANCHOR,
+                  VMSCAN_H_BLOCK, "VMSCAN_H")
+
+
+# 每个头文件负责的 hook 名（用于"是否已声明"判定）
+MM_H_NAMES = [
+    "android_vh_extfrag_for_order",
+    "android_vh_tune_watermark_ratio",
+    "android_vh_mm_vip_alloc_harder",
+    "android_vh_mm_vip_kvmalloc",
+    "android_vh_mm_vip_alloc_harder_stat",
+    "android_vh_ra_tuning_max_page",
+]
+VMSCAN_H_NAMES = [
+    "android_vh_memcg_filepages_protect",
+    "android_vh_memcg_protect_lru_gen_add_folio",
+]
+
+
+def _ensure_hooks(p, rel, anchor, block, tag):
+    """确保 hook 在头文件里存在且签名正确，绝不重复插入。"""
+    import re as _re
+    names = MM_H_NAMES if tag == "MM_H" else VMSCAN_H_NAMES
+    if not os.path.isfile(p.path(rel)):
+        p.fail("%s 不存在" % rel)
+        return
+    src = p.read(rel)
+
+    declared = [n for n in names
+                if _re.search(r"DECLARE_HOOK\(\s*%s\s*," % _re.escape(n), src)]
+
+    if len(declared) == len(names):
+        # 全部已声明；校验签名，不一致就地修（不新增条目 -> 不会重定义）
+        fixed = 0
+        for n in names:
+            want_proto = KIT_REFERENCE[n][0]
+            pat = _re.compile(
+                r"(DECLARE_HOOK\(\s*%s\s*,\s*TP_PROTO\()(.*?)(\)\s*,\s*TP_ARGS\()"
+                % _re.escape(n), _re.S)
+            m = pat.search(src)
+            if not m:
+                continue
+            if _squash(m.group(2)) == _squash(want_proto):
+                continue
+            src = src[:m.start(2)] + want_proto + src[m.end(2):]
+            fixed += 1
+        if fixed:
+            p.write(rel, src)
+            p.note("  已修: %s (%d 个 hook 签名与 kit 原文不符，就地修正)"
+                   % (rel, fixed))
+        else:
+            p.note("  跳过(已声明且签名正确): %s" % rel)
+        return
+
+    if declared:
+        # 部分声明 —— 危险：直接插整块会重复。只插缺失的，且不动已声明的。
+        missing = [n for n in names if n not in declared]
+        p.note("  %s 已声明 %d/%d，仅补缺失的 %s"
+               % (rel, len(declared), len(names), missing))
+        extra = ""
+        for n in missing:
+            proto, args = KIT_REFERENCE[n]
+            extra += ("DECLARE_HOOK(%s,\n\tTP_PROTO(%s),\n\tTP_ARGS(%s));\n"
+                      % (n, proto, args))
+        p.insert_before(rel, anchor, "\n" + extra + "\n",
+                        "#ifndef %s_%s" % (MARK, tag))
+        return
+
+    # 完全没声明 -> 插入整块
+    p.insert_before(rel, anchor, block, "#ifndef %s_%s" % (MARK, tag))
 
 
 # ======================================================================
