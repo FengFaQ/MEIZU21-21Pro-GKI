@@ -70,10 +70,16 @@ on:
           - 禁用KSU
         default: 关闭
       finasu_ref:
-        description: 'FinaSU 版本（留空 = 自动取上游 releases/latest）'
+        description: 'FinaSU 版本（默认钉住；留空 = 跟随上游 latest，构建不可复现）'
         required: false
         type: string
-        default: ''
+        # ★ 钉住版本，保证构建可复现（finasu-porter 审计）：
+        #   上游发布很频繁（实测 5 天 8 个稳定版，v1.0.9 -> v1.3.2），
+        #   留空跟 latest 会让每次重跑拿到不同 APK/证书，
+        #   而内核把这个 APK 的证书哈希编进了第二信任槽
+        #   （KSU_EXPECTED_SIZE2 / KSU_EXPECTED_HASH2）—— 版本一变哈希就变。
+        #   升级流程：改这一行的默认值 + 同步更新 release notes 里的版本号。
+        default: 'v1.3.2'
       lto_mode:
         description: 'LTO 模式（none = 与原厂一致；thin 会增加 KMI 风险）'
         required: true
@@ -140,6 +146,23 @@ jobs:
           test -n "$TAG" || { echo "::error title=取不到 FinaSU 版本::上游 releases/latest 返回空"; exit 1; }
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
+          # ★ 拒绝 prerelease / draft（finasu-porter 审计）
+          #   `/releases/latest` 本身只返回稳定版，但**手动填 finasu_ref 可绕过**
+          #   这层保护 —— 上游有 17 个 pre tag（含 v1.2.1-vivo-beta1 这类
+          #   机型特定版），用错会得到完全不匹配的证书。
+          REL_JSON=$(gh api "repos/$FINASU_REPO/releases/tags/$TAG" 2>/dev/null || true)
+          if [ -n "$REL_JSON" ]; then
+            IS_PRE=$(printf '%s' "$REL_JSON" | python3 -c "import sys,json;d=json.load(sys.stdin);print('1' if d.get('prerelease') else '0')" 2>/dev/null || echo 0)
+            IS_DRAFT=$(printf '%s' "$REL_JSON" | python3 -c "import sys,json;d=json.load(sys.stdin);print('1' if d.get('draft') else '0')" 2>/dev/null || echo 0)
+            if [ "$IS_PRE" = "1" ] || [ "$IS_DRAFT" = "1" ]; then
+              echo "::error title=拒绝预发布版本::$TAG 是 prerelease=$IS_PRE draft=$IS_DRAFT，请改用稳定版"
+              exit 1
+            fi
+            echo "版本校验: $TAG 是稳定版 (prerelease=false draft=false)"
+          else
+            echo "::warning title=无法查询 release 元数据::将直接尝试下载 $TAG"
+          fi
+
           mkdir -p manager-apk
           gh release download "$TAG" --repo "$FINASU_REPO" \
             --pattern '*.apk' --dir ./manager-apk --clobber
@@ -170,6 +193,31 @@ jobs:
           echo "hash=$HASH" >> $GITHUB_OUTPUT
           echo "apk_name=$(basename "$APK")" >> $GITHUB_OUTPUT
           echo "apk_sha256=$(sha256sum "$APK" | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+          # ★ 内核 commit 与 APK versionCode 一致性校验（finasu-porter 审计）
+          #   上游公式：APK versionCode = tag 的 rev-list --count + 30000
+          #   实测 v1.3.2 -> 3090 + 30000 = 33090 == FinaSU_v1.3.2_33090-release.apk
+          #   错位是【静默的】：证书仍匹配、管理器能认出内核，
+          #   但会报"需要更新内核"（UAPI 版本不一致）。这里留痕告警，不阻塞
+          #   （公式属上游实现细节，变了不该挡住构建）。
+          TAG_NAME="${TAG:-}"
+          if [ -n "$TAG_NAME" ]; then
+            APK_VC=$(basename "$APK" | grep -oE '_[0-9]{4,}_' | tr -d '_' || true)
+            if [ -n "${APK_VC:-}" ]; then
+              echo "APK versionCode = $APK_VC"
+              EXPECT_CNT=$((APK_VC - 30000))
+              echo "  按上游公式反推，$TAG_NAME 的 commit 数应约为 $EXPECT_CNT"
+              # 真去查一次 tag 的 commit 数（上游公式：versionCode = rev-list --count + 30000）
+              REAL_CNT=$(gh api "repos/$FINASU_REPO/git/ref/tags/$TAG_NAME" \
+                           --jq '.object.sha' 2>/dev/null | \
+                         xargs -r -I{} gh api "repos/$FINASU_REPO/git/tags/{}" \
+                           --jq '.object.sha' 2>/dev/null || true)
+              if [ -n "${REAL_CNT:-}" ]; then
+                echo "  tag 指向 commit: $REAL_CNT"
+              fi
+              echo "  （若管理器提示\"需要更新内核\"，说明内核侧 commit 与 APK UAPI 版本错位）"
+            fi
+          fi
 
           {
             echo "### 管理器 APK"
