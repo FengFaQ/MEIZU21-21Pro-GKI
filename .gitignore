@@ -1,0 +1,84 @@
+# Claude Code
+.claude/
+
+# Gemini
+.gemini/
+
+# IDE & Editors
+.idea/
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+*.rej
+*.temp
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ==================== MEIZU21PRO_GKI: 大块二进制 / 原厂资产不进仓库 ====================
+# 本仓库只保留"文本形态的设备事实"和"已经压缩到很小"的模板：
+#   *.img      —— boot / init_boot / vendor_boot / vendor_dlkm / system_dlkm 等分区镜像
+#   *.ko       —— 原厂模块本体（体积大 + 版权归魅族），只保留清单文本
+#   Image / vmlinux / Module.symvers —— 编译产物
+# 这些都是几十 MB 级，既不合适入库，也会拖慢每次 clone。
+*.img
+*.ko
+*.bin
+*.elf
+*.dtb
+*.dtbo
+Image
+Image.gz
+Image.lz4
+vmlinux
+vmlinux.o
+System.map
+Module.symvers
+*.symvers
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.br
+*.lz4
+*.cpio
+*.apk
+
+# ★ 例外 1：原厂 KMI 基准表必须入库。
+#   device/meizu21pro/stock_Module.symvers = 魅族 21 Pro 原厂导出的 6501 个
+#   KMI 符号 + 32 位 krcrc(CRC)，是 check_krcrc_symvers.py 唯一基准，
+#   也是 TRIM_UNUSED_KSYMS 白名单的配套数据。370KB 纯文本。
+#   上面的 *.symvers 只针对内核编译产生的 Module.symvers（几十 MB 且每次不同）。
+!/device/meizu21pro/stock_Module.symvers
+
+# ★ 例外 2：AVB 骨架模板必须入库。
+#   repack_avb_boot.py 需要一份"原厂 boot.img 布局保真"的模板来克隆 header
+#   并动态解析 AVB0 偏移。骨架 = 原厂镜像把内核 payload 区清零后 zlib 压缩，
+#   96 MiB -> 98 KB，所有字节偏移与原厂完全一致（已用真原厂镜像验证 diff=0）。
+#   没有它就无法注入 AVB0/AVBf，刷机必回 Fastboot。
+!/device/meizu21pro/avb_template/stock_boot_skeleton.img.zlib
+
+# 构建日志目录
+build-logs/
+patch-rejects/
+

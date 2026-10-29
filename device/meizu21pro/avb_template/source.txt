@@ -1,0 +1,15 @@
+# AVB 模板来源清单 —— 由 scripts/make_avb_skeleton.py 自动生成
+# CI 硬门禁: device 必须是 meizu21pro；stock_sha256 必须与压缩包清单一致
+
+device=meizu21pro
+model=M2481
+soc=SM8650
+flyme=Flyme 21Pro
+source=boot.img
+stock_size=100663296
+stock_sha256=ebdd3dc2568c76c36f3a5c8d83e80fa9be7a38ab647f3c306d1137397c58ab52
+header_version=4
+kernel_size=33892864
+avb_vbmeta_offset=0x2054000
+avb_vbmeta_size=2496
+created_by=scripts/make_avb_skeleton.py

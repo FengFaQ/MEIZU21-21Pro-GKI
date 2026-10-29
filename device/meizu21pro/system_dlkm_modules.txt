@@ -1,0 +1,69 @@
+# system_dlkm/lib/modules — module inventory extracted from the stock image.
+# Generated from system_dlkm.img (EROFS). Text only:
+# the .ko bodies are deliberately NOT in this repository.
+# Modules: 57    Total size: 7168825 bytes (6.8 MiB)
+# Module directory /lib/modules/6.1.25-android14-11-maybe-dirty/ MUST match `uname -r`,
+# otherwise none of these 57 modules can be found at boot.
+
+# ==================== modules.load (load order) ====================
+# format: <index> <TAB> <name>.ko
+
+# ==================== all modules (path<TAB>bytes) ====================
+# "loaded" marks modules present in modules.load.
+-	49537	6.1.25-android14-11-maybe-dirty/kernel/drivers/bluetooth/btbcm.ko
+-	42793	6.1.25-android14-11-maybe-dirty/kernel/drivers/bluetooth/btqca.ko
+-	60481	6.1.25-android14-11-maybe-dirty/kernel/drivers/bluetooth/btsdio.ko
+-	263305	6.1.25-android14-11-maybe-dirty/kernel/drivers/bluetooth/hci_uart.ko
+-	98609	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/can/dev/can-dev.ko
+-	79417	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/can/slcan/slcan.ko
+-	61289	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/can/vcan.ko
+-	30545	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/mii.ko
+-	21425	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/bsd_comp.ko
+-	22433	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/ppp_deflate.ko
+-	157017	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/ppp_generic.ko
+-	24865	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/ppp_mppe.ko
+-	64009	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/pppox.ko
+-	66881	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/ppp/pptp.ko
+-	20529	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/slip/slhc.ko
+-	90953	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/aqc111.ko
+-	126889	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/asix.ko
+-	100025	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/ax88179_178a.ko
+-	49073	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/cdc_eem.ko
+-	45265	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/cdc_ether.ko
+-	96089	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/cdc_ncm.ko
+-	253929	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/r8152.ko
+-	47705	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/r8153_ecm.ko
+-	67857	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/rtl8150.ko
+-	115481	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/usb/usbnet.ko
+-	100065	6.1.25-android14-11-maybe-dirty/kernel/drivers/net/wwan/wwan.ko
+-	77561	6.1.25-android14-11-maybe-dirty/kernel/drivers/usb/class/cdc-acm.ko
+-	161617	6.1.25-android14-11-maybe-dirty/kernel/drivers/usb/serial/ftdi_sio.ko
+-	88545	6.1.25-android14-11-maybe-dirty/kernel/drivers/usb/serial/usbserial.ko
+-	169449	6.1.25-android14-11-maybe-dirty/kernel/kernel/kheaders.ko
+-	10961	6.1.25-android14-11-maybe-dirty/kernel/lib/crypto/libarc4.ko
+-	52249	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/6lowpan.ko
+-	12057	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_dest.ko
+-	12065	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_fragment.ko
+-	12057	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_hop.ko
+-	11993	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_ipv6.ko
+-	12065	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_mobility.ko
+-	12065	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_routing.ko
+-	15489	6.1.25-android14-11-maybe-dirty/kernel/net/6lowpan/nhc_udp.ko
+-	113865	6.1.25-android14-11-maybe-dirty/kernel/net/8021q/8021q.ko
+-	1386777	6.1.25-android14-11-maybe-dirty/kernel/net/bluetooth/bluetooth.ko
+-	132673	6.1.25-android14-11-maybe-dirty/kernel/net/bluetooth/hidp/hidp.ko
+-	237721	6.1.25-android14-11-maybe-dirty/kernel/net/bluetooth/rfcomm/rfcomm.ko
+-	95793	6.1.25-android14-11-maybe-dirty/kernel/net/can/can-bcm.ko
+-	82977	6.1.25-android14-11-maybe-dirty/kernel/net/can/can-gw.ko
+-	83737	6.1.25-android14-11-maybe-dirty/kernel/net/can/can-raw.ko
+-	97545	6.1.25-android14-11-maybe-dirty/kernel/net/can/can.ko
+-	64297	6.1.25-android14-11-maybe-dirty/kernel/net/ieee802154/6lowpan/ieee802154_6lowpan.ko
+-	295977	6.1.25-android14-11-maybe-dirty/kernel/net/ieee802154/ieee802154.ko
+-	74481	6.1.25-android14-11-maybe-dirty/kernel/net/ieee802154/ieee802154_socket.ko
+-	149657	6.1.25-android14-11-maybe-dirty/kernel/net/l2tp/l2tp_core.ko
+-	111089	6.1.25-android14-11-maybe-dirty/kernel/net/l2tp/l2tp_ppp.ko
+-	246105	6.1.25-android14-11-maybe-dirty/kernel/net/mac802154/mac802154.ko
+-	233089	6.1.25-android14-11-maybe-dirty/kernel/net/nfc/nfc.ko
+-	63809	6.1.25-android14-11-maybe-dirty/kernel/net/rfkill/rfkill.ko
+-	14745	6.1.25-android14-11-maybe-dirty/kernel/net/tipc/diag.ko
+-	879849	6.1.25-android14-11-maybe-dirty/kernel/net/tipc/tipc.ko

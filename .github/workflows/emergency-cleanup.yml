@@ -1,0 +1,127 @@
+name: 紧急下架 (release 撤回 + dist 清空)
+
+# ============================================================================
+# 用途：变砖 / 严重问题时一键撤回，把用户导回可启动状态。
+# 21 Pro 是主力机，这条通道属于救急手段，必须可靠。
+#
+# 本仓库产物通道有三处，必须一起清，否则用户仍能拿到问题版本：
+#   1. 正式 release  meizu21pro-finatsu-<run#>
+#   2. 别名 release  meizu21pro-latest
+#   3. dist 分支     （产物留档，CI 每次 force-push 更新）
+#
+# 安全：仅仓库 owner 可执行（下架不可逆）。
+# ============================================================================
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: '要下架的 release tag（留空 = 只清 latest 与 dist）'
+        required: false
+        type: string
+        default: ''
+      issue_type:
+        description: '问题类型（写进下架说明，便于复盘）'
+        required: true
+        type: choice
+        options:
+          - 'boot 失败 / 无法开机'
+          - '模块加载失败'
+          - 'root 不可用'
+          - '其它紧急问题'
+        default: 'boot 失败 / 无法开机'
+      reference:
+        description: '参考信息（run 号 / 现象 / 日志链接）'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: emergency-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: 撤回 release 与 dist
+    runs-on: ubuntu-latest
+    # 仅允许仓库所有者执行
+    if: github.actor == github.repository_owner
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: 记录执行信息
+        run: |
+          echo "执行人: ${{ github.actor }}"
+          echo "目标 tag: ${{ inputs.target_tag || '(空 -> 仅清 latest/dist)' }}"
+          echo "问题类型: ${{ inputs.issue_type }}"
+          {
+            echo "### 紧急下架"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 执行人 | ${{ github.actor }} |"
+            echo "| 目标 tag | ${{ inputs.target_tag || '(仅 latest/dist)' }} |"
+            echo "| 问题类型 | ${{ inputs.issue_type }} |"
+            echo "| 参考 | ${{ inputs.reference || '-' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 1/3 下架指定的正式 release
+        if: inputs.target_tag != ''
+        run: |
+          set -uo pipefail
+          TAG="${{ inputs.target_tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # 先转 draft，立刻从"最新"列表消失，再删除
+            gh release edit "$TAG" --draft || true
+            gh release delete "$TAG" --yes --cleanup-tag
+            echo "已下架并删除 tag: $TAG"
+          else
+            echo "::warning title=release 不存在::$TAG 已不在，跳过"
+          fi
+
+      - name: 2/3 下架 latest 别名
+        run: |
+          set -uo pipefail
+          if gh release view meizu21pro-latest >/dev/null 2>&1; then
+            gh release delete meizu21pro-latest --yes --cleanup-tag
+            echo "已下架 latest 别名"
+          else
+            echo "latest 别名不存在，跳过"
+          fi
+
+      - name: 3/3 清空 dist 分支
+        run: |
+          set -uo pipefail
+          URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          if git ls-remote --exit-code --heads "$URL" dist >/dev/null 2>&1; then
+            git push --delete "$URL" dist
+            echo "已删除 dist 分支"
+          else
+            echo "dist 分支不存在，跳过"
+          fi
+
+      - name: 写出救急指引
+        run: |
+          set -euo pipefail
+          {
+            echo ""
+            echo "### ⚠ 下架完成 —— 救急步骤"
+            echo ""
+            echo "问题类型: **${{ inputs.issue_type }}**"
+            echo ""
+            echo '```bash'
+            echo "# 1. 切回原厂槽位"
+            echo "fastboot --set-active=a"
+            echo ""
+            echo "# 2. 若两槽都已刷坏，从线刷包重刷 boot"
+            echo "fastboot flash boot boot.img"
+            echo '```'
+            echo ""
+            echo "原厂 boot.img 校验："
+            echo "sha256 = \`ebdd3dc2568c76c36f3a5c8d83e80fa9be7a38ab647f3c306d1137397c58ab52\`"
+          } >> "$GITHUB_STEP_SUMMARY"

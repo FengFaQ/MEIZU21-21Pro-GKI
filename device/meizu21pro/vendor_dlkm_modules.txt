@@ -1,0 +1,749 @@
+# vendor_dlkm/lib/modules — module inventory extracted from the stock image.
+# Generated from vendor_dlkm.img (EROFS). Text only:
+# the .ko bodies are deliberately NOT in this repository.
+# Modules: 304    Total size: 68579312 bytes (65.4 MiB)
+# modules.load has 431 entries covering 304 distinct modules
+# (the stock list repeats some names for dependency ordering);
+# 0 of the 304 extracted .ko are not in modules.load —
+# those are autoloaded on demand by modalias, or never loaded by stock.
+
+# ==================== modules.load (load order) ====================
+# format: <index> <TAB> <name>.ko
+1	msm_sysstats.ko
+2	msm_show_resume_irq.ko
+3	mhi.ko
+4	mhi_dev_uci.ko
+5	mhi_dev_satellite.ko
+6	phy-qcom-ufs-qmp-v4-kalama.ko
+7	phy-qcom-ufs-qmp-v4.ko
+8	phy-qcom-ufs-qmp-v4-waipio.ko
+9	pinctrl-spmi-gpio.ko
+10	pinctrl-spmi-mpp.ko
+11	pwm-qti-lpg.ko
+12	pci-msm-drv.ko
+13	debugcc-pineapple.ko
+14	gpucc-cliffs.ko
+15	bam_dma.ko
+16	msm_gpi.ko
+17	qcom_cpuss_sleep_stats.ko
+18	pcie-pdc.ko
+19	pdr_interface.ko
+20	qmi_helpers.ko
+21	heap_mem_ext_v01.ko
+22	msm_memshare.ko
+23	smp2p.ko
+24	smp2p_sleepstate.ko
+25	qsee_ipc_irq_bridge.ko
+26	glink_probe.ko
+27	pmic_glink.ko
+28	qti_battery_debug.ko
+29	charger-ulog-glink.ko
+30	altmode-glink.ko
+31	pmic-glink-debug.ko
+32	mem-hooks.ko
+33	qcom_stats.ko
+34	eud.ko
+35	llcc-qcom.ko
+36	llcc_perfmon.ko
+37	boot_stats.ko
+38	rq_stats.ko
+39	core_hang_detect.ko
+40	qcom_va_minidump.ko
+41	qcom_logbuf_vendor_hooks.ko
+42	qcom_logbuf_boot_log.ko
+43	hung_task_enh.ko
+44	mem-offline.ko
+45	msm_show_epoch.ko
+46	gh_tlmm_vm_mem_access.ko
+47	sps_drv.ko
+48	qcom_ramdump.ko
+49	memlat.ko
+50	bwmon.ko
+51	c1dcvs_scmi_v2.ko
+52	mpam.ko
+53	cpufreq_stats_scmi_v2.ko
+54	dynpf_scmi.ko
+55	cpucp_log.ko
+56	sys_pm_vx.ko
+57	msm_performance.ko
+58	wcd_usbss_i2c.ko
+59	sysmon_subsystem_stats.ko
+60	cdsprm.ko
+61	adsp_sleepmon.ko
+62	panel_event_notifier.ko
+63	dmesg_dumper.ko
+64	health_monitor.ko
+65	qfprom-sys.ko
+66	qti-fixed-regulator.ko
+67	qti-ocp-notifier.ko
+68	qcom_pm8008-regulator.ko
+69	hvc_gunyah.ko
+70	msm_geni_serial.ko
+71	rdbg.ko
+72	qcom_iommu_debug.ko
+73	drm_dp_aux_bus.ko
+74	drm_display_helper.ko
+75	lt9611uxc.ko
+76	qseecom_proxy.ko
+77	qcom-i2c-pmic.ko
+78	qcom-pm8008.ko
+79	sg.ko
+80	spi-msm-geni.ko
+81	spmi-pmic-arb-debug.ko
+82	msm_sharedmem.ko
+83	phy-generic.ko
+84	phy-qcom-emu.ko
+85	phy-msm-ssusb-qmp.ko
+86	phy-msm-snps-eusb2.ko
+87	dwc3-msm.ko
+88	usb_f_cdev.ko
+89	usb_f_ccid.ko
+90	usb_f_qdss.ko
+91	usb_f_gsi.ko
+92	ucsi_glink.ko
+93	repeater.ko
+94	repeater-qti-pmic-eusb2.ko
+95	redriver.ko
+96	nb7vpq904m.ko
+97	pm8941-pwrkey.ko
+98	qcom-hv-haptics.ko
+99	i2c-msm-geni.ko
+100	i3c-master-msm-geni.ko
+101	qcom-dload-mode.ko
+102	qcom-pon.ko
+103	reboot-mode.ko
+104	qti_battery_charger.ko
+105	qcom-spmi-temp-alarm.ko
+106	bcl_soc.ko
+107	qti_qmi_cdev.ko
+108	qti_qmi_sensor_v2.ko
+109	qti_cpufreq_cdev.ko
+110	qti_devfreq_cdev.ko
+111	cpu_voltage_cooling.ko
+112	ddr_cdev.ko
+113	qti_userspace_cdev.ko
+114	max31760_fan.ko
+115	msm_lmh_dcvs.ko
+116	thermal_config.ko
+117	qcom_edac.ko
+118	qcom-cpufreq-hw-debug.ko
+119	qcom_lpm.ko
+120	leds-qti-flash.ko
+121	leds-qti-tri-led.ko
+122	qcom_pil_info.ko
+123	rproc_qcom_common.ko
+124	qcom_q6v5.ko
+125	qcom_q6v5_pas.ko
+126	qcom_spss.ko
+127	qcom_sysmon.ko
+128	qcom_glink.ko
+129	qcom_glink_smem.ko
+130	qcom_glink_spss.ko
+131	qcom_smd.ko
+132	glink_pkt.ko
+133	gh_ctrl.ko
+134	gh_irq_lend.ko
+135	gh_rm_booster.ko
+136	gh_mem_notifier.ko
+137	gh_panic_notifier.ko
+138	qcom-spmi-adc5-gen3.ko
+139	qcom-vadc-common.ko
+140	qti-glink-adc.ko
+141	nvmem_qfprom.ko
+142	slimbus.ko
+143	slim-qcom-ngd-ctrl.ko
+144	coresight.ko
+145	coresight-tmc.ko
+146	coresight-funnel.ko
+147	coresight-replicator.ko
+148	coresight-stm.ko
+149	coresight-cti.ko
+150	coresight-dummy.ko
+151	coresight-remote-etm.ko
+152	coresight-tmc-sec.ko
+153	coresight-trace-noc.ko
+154	coresight-tgu.ko
+155	coresight-hwevent.ko
+156	coresight-tpda.ko
+157	coresight-tpdm.ko
+158	coresight-csr.ko
+159	stm_core.ko
+160	stm_p_ost.ko
+161	stm_console.ko
+162	stm_heartbeat.ko
+163	stm_ftrace.ko
+164	snd-usb-audio-qmi.ko
+165	snd-soc-hdmi-codec.ko
+166	cfg80211.ko
+167	mac80211.ko
+168	qrtr-smd.ko
+169	qrtr-mhi.ko
+170	bootloader_log.ko
+171	mz_bl_lock.ko
+172	meizu_private.ko
+173	mz_rpmb_ctl.ko
+174	mpower_logger.ko
+175	mz_vbat_monitor.ko
+176	mz_chg_interface.ko
+177	mz_mbattery_logger.ko
+178	mz_chg_manager.ko
+179	mz_chg_thermal.ko
+180	mz_soc_linearize.ko
+181	pwm_ir.ko
+182	cs_press_m68.ko
+183	cs_press_f71.ko
+184	leds-aw20072.ko
+185	haptic_aac.ko
+186	vl53l1.ko
+187	ai11ba.ko
+188	et5907.ko
+189	mz_rstinfo.ko
+190	mz_hang_dump.ko
+191	mz_debug_vendor_hooks.ko
+192	stability_test.ko
+193	mz_hung_task_enh.ko
+194	mz_task_overtime.ko
+195	mz_kshrink_slabd.ko
+196	mz_compaction_opt.ko
+197	mz_watermark_opt.ko
+198	mz_mm_vip.ko
+199	mz_locking_opt.ko
+200	smartswap_zram.ko
+201	smart_zsmalloc.ko
+202	mz_mm_protect.ko
+203	mz_readahead_opt.ko
+204	kswapd_opt.ko
+205	mz_mrg.ko
+206	procs_load.ko
+207	mz_thermal_log.ko
+208	mz_thermal_constant.ko
+209	mz_thermal_shell.ko
+210	mz_thermal_virtual.ko
+211	mzbp.ko
+212	qca_cld3_kiwi_v2.ko
+213	cnss2.ko
+214	cnss_plat_ipc_qmi_svc.ko
+215	wlan_firmware_service.ko
+216	cnss_nl.ko
+217	cnss_prealloc.ko
+218	cnss_utils.ko
+219	q6_notifier_dlkm.ko
+220	spf_core_dlkm.ko
+221	audpkt_ion_dlkm.ko
+222	gpr_dlkm.ko
+223	audio_pkt_dlkm.ko
+224	q6_dlkm.ko
+225	adsp_loader_dlkm.ko
+226	audio_prm_dlkm.ko
+227	q6_pdr_dlkm.ko
+228	pinctrl_lpi_dlkm.ko
+229	swr_dlkm.ko
+230	swr_ctrl_dlkm.ko
+231	snd_event_dlkm.ko
+232	wcd_core_dlkm.ko
+233	mbhc_dlkm.ko
+234	wcd9xxx_dlkm.ko
+235	stub_dlkm.ko
+236	cirrus_cali_dlkm.ko
+237	machine_dlkm.ko
+238	cs35l43_dlkm.ko
+239	swr_dmic_dlkm.ko
+240	swr_haptics_dlkm.ko
+241	hdmi_dlkm.ko
+242	lpass_cdc_wsa2_macro_dlkm.ko
+243	lpass_cdc_wsa_macro_dlkm.ko
+244	lpass_cdc_va_macro_dlkm.ko
+245	lpass_cdc_rx_macro_dlkm.ko
+246	lpass_cdc_tx_macro_dlkm.ko
+247	lpass_cdc_dlkm.ko
+248	wsa884x_dlkm.ko
+249	wsa883x_dlkm.ko
+250	wcd938x_dlkm.ko
+251	wcd938x_slave_dlkm.ko
+252	wcd939x_dlkm.ko
+253	wcd939x_slave_dlkm.ko
+254	q6_notifier_dlkm.ko
+255	spf_core_dlkm.ko
+256	audpkt_ion_dlkm.ko
+257	gpr_dlkm.ko
+258	audio_pkt_dlkm.ko
+259	q6_dlkm.ko
+260	adsp_loader_dlkm.ko
+261	audio_prm_dlkm.ko
+262	q6_pdr_dlkm.ko
+263	pinctrl_lpi_dlkm.ko
+264	swr_dlkm.ko
+265	swr_ctrl_dlkm.ko
+266	snd_event_dlkm.ko
+267	wcd_core_dlkm.ko
+268	mbhc_dlkm.ko
+269	wcd9xxx_dlkm.ko
+270	stub_dlkm.ko
+271	cirrus_cali_dlkm.ko
+272	machine_dlkm.ko
+273	cs35l43_dlkm.ko
+274	swr_dmic_dlkm.ko
+275	swr_haptics_dlkm.ko
+276	hdmi_dlkm.ko
+277	lpass_cdc_wsa2_macro_dlkm.ko
+278	lpass_cdc_wsa_macro_dlkm.ko
+279	lpass_cdc_va_macro_dlkm.ko
+280	lpass_cdc_rx_macro_dlkm.ko
+281	lpass_cdc_tx_macro_dlkm.ko
+282	lpass_cdc_dlkm.ko
+283	wsa884x_dlkm.ko
+284	wsa883x_dlkm.ko
+285	wcd938x_dlkm.ko
+286	wcd938x_slave_dlkm.ko
+287	wcd939x_dlkm.ko
+288	wcd939x_slave_dlkm.ko
+289	stm_st54se_gpio.ko
+290	qcedev-mod_dlkm.ko
+291	qcrypto-msm_dlkm.ko
+292	qce50_dlkm.ko
+293	hdcp_qseecom_dlkm.ko
+294	qrng_dlkm.ko
+295	smmu_proxy_dlkm.ko
+296	smcinvoke_dlkm.ko
+297	tz_log_dlkm.ko
+298	qseecom_dlkm.ko
+299	ubwcp.ko
+300	btpower.ko
+301	bt_fm_slim.ko
+302	radio-i2c-rtc6226-qca.ko
+303	qca_cld3_kiwi_v2.ko
+304	cnss2.ko
+305	cnss_plat_ipc_qmi_svc.ko
+306	wlan_firmware_service.ko
+307	cnss_nl.ko
+308	cnss_prealloc.ko
+309	cnss_utils.ko
+310	q6_notifier_dlkm.ko
+311	spf_core_dlkm.ko
+312	audpkt_ion_dlkm.ko
+313	gpr_dlkm.ko
+314	audio_pkt_dlkm.ko
+315	q6_dlkm.ko
+316	adsp_loader_dlkm.ko
+317	audio_prm_dlkm.ko
+318	q6_pdr_dlkm.ko
+319	pinctrl_lpi_dlkm.ko
+320	swr_dlkm.ko
+321	swr_ctrl_dlkm.ko
+322	snd_event_dlkm.ko
+323	wcd_core_dlkm.ko
+324	mbhc_dlkm.ko
+325	wcd9xxx_dlkm.ko
+326	stub_dlkm.ko
+327	cirrus_cali_dlkm.ko
+328	machine_dlkm.ko
+329	cs35l43_dlkm.ko
+330	swr_dmic_dlkm.ko
+331	swr_haptics_dlkm.ko
+332	hdmi_dlkm.ko
+333	lpass_cdc_wsa2_macro_dlkm.ko
+334	lpass_cdc_wsa_macro_dlkm.ko
+335	lpass_cdc_va_macro_dlkm.ko
+336	lpass_cdc_rx_macro_dlkm.ko
+337	lpass_cdc_tx_macro_dlkm.ko
+338	lpass_cdc_dlkm.ko
+339	wsa884x_dlkm.ko
+340	wsa883x_dlkm.ko
+341	wcd938x_dlkm.ko
+342	wcd938x_slave_dlkm.ko
+343	wcd939x_dlkm.ko
+344	wcd939x_slave_dlkm.ko
+345	q6_notifier_dlkm.ko
+346	spf_core_dlkm.ko
+347	audpkt_ion_dlkm.ko
+348	gpr_dlkm.ko
+349	audio_pkt_dlkm.ko
+350	q6_dlkm.ko
+351	adsp_loader_dlkm.ko
+352	audio_prm_dlkm.ko
+353	q6_pdr_dlkm.ko
+354	pinctrl_lpi_dlkm.ko
+355	swr_dlkm.ko
+356	swr_ctrl_dlkm.ko
+357	snd_event_dlkm.ko
+358	wcd_core_dlkm.ko
+359	mbhc_dlkm.ko
+360	wcd9xxx_dlkm.ko
+361	stub_dlkm.ko
+362	cirrus_cali_dlkm.ko
+363	machine_dlkm.ko
+364	cs35l43_dlkm.ko
+365	swr_dmic_dlkm.ko
+366	swr_haptics_dlkm.ko
+367	hdmi_dlkm.ko
+368	lpass_cdc_wsa2_macro_dlkm.ko
+369	lpass_cdc_wsa_macro_dlkm.ko
+370	lpass_cdc_va_macro_dlkm.ko
+371	lpass_cdc_rx_macro_dlkm.ko
+372	lpass_cdc_tx_macro_dlkm.ko
+373	lpass_cdc_dlkm.ko
+374	wsa884x_dlkm.ko
+375	wsa883x_dlkm.ko
+376	wcd938x_dlkm.ko
+377	wcd938x_slave_dlkm.ko
+378	wcd939x_dlkm.ko
+379	wcd939x_slave_dlkm.ko
+380	btpower.ko
+381	bt_fm_slim.ko
+382	radio-i2c-rtc6226-qca.ko
+383	camera.ko
+384	gsim.ko
+385	ipam.ko
+386	ipanetm.ko
+387	rmnet_core.ko
+388	rmnet_ctl.ko
+389	rmnet_offload.ko
+390	rmnet_perf_tether.ko
+391	rmnet_perf.ko
+392	rmnet_wlan.ko
+393	rmnet_mem.ko
+394	rmnet_shs.ko
+395	rmnet_aps.ko
+396	rmnet_sch.ko
+397	rmnet_wlan.ko
+398	msm_drm.ko
+399	frpc-adsprpc.ko
+400	cdsp-loader.ko
+401	stm_st54se_gpio.ko
+402	msm-eva.ko
+403	mz_qbt_handler.ko
+404	msm_ext_display.ko
+405	sync_fence.ko
+406	msm_hw_fence.ko
+407	msm-mmrm.ko
+408	stm_nfc_i2c.ko
+409	nxp-nci.ko
+410	qcedev-mod_dlkm.ko
+411	qcrypto-msm_dlkm.ko
+412	qce50_dlkm.ko
+413	hdcp_qseecom_dlkm.ko
+414	qrng_dlkm.ko
+415	smmu_proxy_dlkm.ko
+416	smcinvoke_dlkm.ko
+417	tz_log_dlkm.ko
+418	qseecom_dlkm.ko
+419	spcom.ko
+420	spss_utils.ko
+421	synx-driver.ko
+422	ipclite.ko
+423	ipclite_test.ko
+424	nt36xxx-i2c.ko
+425	goodix_ts.ko
+426	mz_gesture_ts.ko
+427	atmel_mxt_ts.ko
+428	ubwcp.ko
+429	msm_video.ko
+430	v4l2loopback.ko
+431	msm_kgsl.ko
+
+# ==================== all modules (path<TAB>bytes) ====================
+# "loaded" marks modules present in modules.load.
+loaded	23848	adsp_loader_dlkm.ko
+loaded	79072	adsp_sleepmon.ko
+loaded	84656	ai11ba.ko
+loaded	34112	altmode-glink.ko
+loaded	71512	atmel_mxt_ts.ko
+loaded	42232	audio_pkt_dlkm.ko
+loaded	26888	audio_prm_dlkm.ko
+loaded	36472	audpkt_ion_dlkm.ko
+loaded	59552	bam_dma.ko
+loaded	20648	bcl_soc.ko
+loaded	14792	boot_stats.ko
+loaded	17744	bootloader_log.ko
+loaded	46120	bt_fm_slim.ko
+loaded	63672	btpower.ko
+loaded	73904	bwmon.ko
+loaded	29176	c1dcvs_scmi_v2.ko
+loaded	6194832	camera.ko
+loaded	18752	cdsp-loader.ko
+loaded	93408	cdsprm.ko
+loaded	2117496	cfg80211.ko
+loaded	30408	charger-ulog-glink.ko
+loaded	35712	cirrus_cali_dlkm.ko
+loaded	787824	cnss2.ko
+loaded	15768	cnss_nl.ko
+loaded	50352	cnss_plat_ipc_qmi_svc.ko
+loaded	21040	cnss_prealloc.ko
+loaded	33224	cnss_utils.ko
+loaded	25632	core_hang_detect.ko
+loaded	45304	coresight-csr.ko
+loaded	88472	coresight-cti.ko
+loaded	21536	coresight-dummy.ko
+loaded	31264	coresight-funnel.ko
+loaded	25072	coresight-hwevent.ko
+loaded	31504	coresight-remote-etm.ko
+loaded	30208	coresight-replicator.ko
+loaded	39224	coresight-stm.ko
+loaded	25240	coresight-tgu.ko
+loaded	38024	coresight-tmc-sec.ko
+loaded	116024	coresight-tmc.ko
+loaded	34936	coresight-tpda.ko
+loaded	130032	coresight-tpdm.ko
+loaded	26840	coresight-trace-noc.ko
+loaded	155592	coresight.ko
+loaded	23784	cpu_voltage_cooling.ko
+loaded	27928	cpucp_log.ko
+loaded	21384	cpufreq_stats_scmi_v2.ko
+loaded	456160	cs35l43_dlkm.ko
+loaded	211392	cs_press_f71.ko
+loaded	213192	cs_press_m68.ko
+loaded	16392	ddr_cdev.ko
+loaded	44864	debugcc-pineapple.ko
+loaded	35392	dmesg_dumper.ko
+loaded	254384	drm_display_helper.ko
+loaded	24024	drm_dp_aux_bus.ko
+loaded	201416	dwc3-msm.ko
+loaded	16912	dynpf_scmi.ko
+loaded	42072	et5907.ko
+loaded	36232	eud.ko
+loaded	669928	frpc-adsprpc.ko
+loaded	25248	gh_ctrl.ko
+loaded	28096	gh_irq_lend.ko
+loaded	15640	gh_mem_notifier.ko
+loaded	33512	gh_panic_notifier.ko
+loaded	23648	gh_rm_booster.ko
+loaded	24232	gh_tlmm_vm_mem_access.ko
+loaded	82152	glink_pkt.ko
+loaded	23656	glink_probe.ko
+loaded	393200	goodix_ts.ko
+loaded	41600	gpr_dlkm.ko
+loaded	35736	gpucc-cliffs.ko
+loaded	525144	gsim.ko
+loaded	126288	haptic_aac.ko
+loaded	83888	hdcp_qseecom_dlkm.ko
+loaded	43576	hdmi_dlkm.ko
+loaded	111136	health_monitor.ko
+loaded	43496	heap_mem_ext_v01.ko
+loaded	20384	hung_task_enh.ko
+loaded	21656	hvc_gunyah.ko
+loaded	112616	i2c-msm-geni.ko
+loaded	113456	i3c-master-msm-geni.ko
+loaded	6354408	ipam.ko
+loaded	13000	ipanetm.ko
+loaded	133136	ipclite.ko
+loaded	66072	ipclite_test.ko
+loaded	35152	kswapd_opt.ko
+loaded	63080	leds-aw20072.ko
+loaded	55072	leds-qti-flash.ko
+loaded	25952	leds-qti-tri-led.ko
+loaded	54096	llcc-qcom.ko
+loaded	61112	llcc_perfmon.ko
+loaded	123104	lpass_cdc_dlkm.ko
+loaded	221072	lpass_cdc_rx_macro_dlkm.ko
+loaded	136576	lpass_cdc_tx_macro_dlkm.ko
+loaded	129224	lpass_cdc_va_macro_dlkm.ko
+loaded	206616	lpass_cdc_wsa2_macro_dlkm.ko
+loaded	204664	lpass_cdc_wsa_macro_dlkm.ko
+loaded	81224	lt9611uxc.ko
+loaded	2155840	mac80211.ko
+loaded	162216	machine_dlkm.ko
+loaded	28544	max31760_fan.ko
+loaded	83592	mbhc_dlkm.ko
+loaded	33064	meizu_private.ko
+loaded	14792	mem-hooks.ko
+loaded	65928	mem-offline.ko
+loaded	83080	memlat.ko
+loaded	264328	mhi.ko
+loaded	48904	mhi_dev_satellite.ko
+loaded	50792	mhi_dev_uci.ko
+loaded	15888	mpam.ko
+loaded	26568	mpower_logger.ko
+loaded	900216	msm-eva.ko
+loaded	101176	msm-mmrm.ko
+loaded	4680992	msm_drm.ko
+loaded	27432	msm_ext_display.ko
+loaded	165296	msm_geni_serial.ko
+loaded	104344	msm_gpi.ko
+loaded	256136	msm_hw_fence.ko
+loaded	2562536	msm_kgsl.ko
+loaded	27208	msm_lmh_dcvs.ko
+loaded	50504	msm_memshare.ko
+loaded	69120	msm_performance.ko
+loaded	19504	msm_sharedmem.ko
+loaded	11040	msm_show_epoch.ko
+loaded	24192	msm_show_resume_irq.ko
+loaded	81760	msm_sysstats.ko
+loaded	1252136	msm_video.ko
+loaded	14376	mz_bl_lock.ko
+loaded	49568	mz_chg_interface.ko
+loaded	31784	mz_chg_manager.ko
+loaded	21672	mz_chg_thermal.ko
+loaded	33376	mz_compaction_opt.ko
+loaded	16272	mz_debug_vendor_hooks.ko
+loaded	25800	mz_gesture_ts.ko
+loaded	36176	mz_hang_dump.ko
+loaded	18128	mz_hung_task_enh.ko
+loaded	25056	mz_kshrink_slabd.ko
+loaded	122392	mz_locking_opt.ko
+loaded	30304	mz_mbattery_logger.ko
+loaded	33696	mz_mm_protect.ko
+loaded	27792	mz_mm_vip.ko
+loaded	69424	mz_mrg.ko
+loaded	77032	mz_qbt_handler.ko
+loaded	22760	mz_readahead_opt.ko
+loaded	62544	mz_rpmb_ctl.ko
+loaded	106768	mz_rstinfo.ko
+loaded	28568	mz_soc_linearize.ko
+loaded	34936	mz_task_overtime.ko
+loaded	14328	mz_thermal_constant.ko
+loaded	45400	mz_thermal_log.ko
+loaded	23296	mz_thermal_shell.ko
+loaded	23176	mz_thermal_virtual.ko
+loaded	20072	mz_vbat_monitor.ko
+loaded	23256	mz_watermark_opt.ko
+loaded	130424	mzbp.ko
+loaded	41048	nb7vpq904m.ko
+loaded	231856	nt36xxx-i2c.ko
+loaded	26456	nvmem_qfprom.ko
+loaded	80952	nxp-nci.ko
+loaded	16072	panel_event_notifier.ko
+loaded	494040	pci-msm-drv.ko
+loaded	16400	pcie-pdc.ko
+loaded	39048	pdr_interface.ko
+loaded	24792	phy-generic.ko
+loaded	48040	phy-msm-snps-eusb2.ko
+loaded	37424	phy-msm-ssusb-qmp.ko
+loaded	17792	phy-qcom-emu.ko
+loaded	26456	phy-qcom-ufs-qmp-v4-kalama.ko
+loaded	27368	phy-qcom-ufs-qmp-v4-waipio.ko
+loaded	27224	phy-qcom-ufs-qmp-v4.ko
+loaded	58672	pinctrl-spmi-gpio.ko
+loaded	38416	pinctrl-spmi-mpp.ko
+loaded	47088	pinctrl_lpi_dlkm.ko
+loaded	23216	pm8941-pwrkey.ko
+loaded	25872	pmic-glink-debug.ko
+loaded	40248	pmic_glink.ko
+loaded	22272	procs_load.ko
+loaded	57352	pwm-qti-lpg.ko
+loaded	20832	pwm_ir.ko
+loaded	15856	q6_dlkm.ko
+loaded	37536	q6_notifier_dlkm.ko
+loaded	12696	q6_pdr_dlkm.ko
+loaded	18886800	qca_cld3_kiwi_v2.ko
+loaded	133392	qce50_dlkm.ko
+loaded	136560	qcedev-mod_dlkm.ko
+loaded	21872	qcom-cpufreq-hw-debug.ko
+loaded	27928	qcom-dload-mode.ko
+loaded	236648	qcom-hv-haptics.ko
+loaded	36640	qcom-i2c-pmic.ko
+loaded	16584	qcom-pm8008.ko
+loaded	15608	qcom-pon.ko
+loaded	56256	qcom-spmi-adc5-gen3.ko
+loaded	26664	qcom-spmi-temp-alarm.ko
+loaded	35600	qcom-vadc-common.ko
+loaded	30104	qcom_cpuss_sleep_stats.ko
+loaded	22272	qcom_edac.ko
+loaded	91736	qcom_glink.ko
+loaded	19784	qcom_glink_smem.ko
+loaded	20352	qcom_glink_spss.ko
+loaded	104552	qcom_iommu_debug.ko
+loaded	14672	qcom_logbuf_boot_log.ko
+loaded	15496	qcom_logbuf_vendor_hooks.ko
+loaded	89240	qcom_lpm.ko
+loaded	17248	qcom_pil_info.ko
+loaded	47312	qcom_pm8008-regulator.ko
+loaded	27480	qcom_q6v5.ko
+loaded	107304	qcom_q6v5_pas.ko
+loaded	24672	qcom_ramdump.ko
+loaded	43496	qcom_smd.ko
+loaded	43072	qcom_spss.ko
+loaded	68872	qcom_stats.ko
+loaded	45488	qcom_sysmon.ko
+loaded	38096	qcom_va_minidump.ko
+loaded	136648	qcrypto-msm_dlkm.ko
+loaded	15624	qfprom-sys.ko
+loaded	101568	qmi_helpers.ko
+loaded	26768	qrng_dlkm.ko
+loaded	87896	qrtr-mhi.ko
+loaded	17128	qrtr-smd.ko
+loaded	35704	qsee_ipc_irq_bridge.ko
+loaded	284744	qseecom_dlkm.ko
+loaded	14648	qseecom_proxy.ko
+loaded	21624	qti-fixed-regulator.ko
+loaded	21520	qti-glink-adc.ko
+loaded	21480	qti-ocp-notifier.ko
+loaded	79472	qti_battery_charger.ko
+loaded	38416	qti_battery_debug.ko
+loaded	21352	qti_cpufreq_cdev.ko
+loaded	18360	qti_devfreq_cdev.ko
+loaded	95344	qti_qmi_cdev.ko
+loaded	118136	qti_qmi_sensor_v2.ko
+loaded	16744	qti_userspace_cdev.ko
+loaded	84424	radio-i2c-rtc6226-qca.ko
+loaded	38136	rdbg.ko
+loaded	16600	reboot-mode.ko
+loaded	18456	redriver.ko
+loaded	27936	repeater-qti-pmic-eusb2.ko
+loaded	19008	repeater.ko
+loaded	49672	rmnet_aps.ko
+loaded	430984	rmnet_core.ko
+loaded	25472	rmnet_ctl.ko
+loaded	37856	rmnet_mem.ko
+loaded	39848	rmnet_offload.ko
+loaded	37376	rmnet_perf.ko
+loaded	26744	rmnet_perf_tether.ko
+loaded	18648	rmnet_sch.ko
+loaded	302840	rmnet_shs.ko
+loaded	87360	rmnet_wlan.ko
+loaded	65912	rproc_qcom_common.ko
+loaded	15320	rq_stats.ko
+loaded	142472	sg.ko
+loaded	190392	slim-qcom-ngd-ctrl.ko
+loaded	57296	slimbus.ko
+loaded	52048	smart_zsmalloc.ko
+loaded	547544	smartswap_zram.ko
+loaded	274072	smcinvoke_dlkm.ko
+loaded	30376	smmu_proxy_dlkm.ko
+loaded	35432	smp2p.ko
+loaded	15096	smp2p_sleepstate.ko
+loaded	31824	snd-soc-hdmi-codec.ko
+loaded	181392	snd-usb-audio-qmi.ko
+loaded	23888	snd_event_dlkm.ko
+loaded	173688	spcom.ko
+loaded	37128	spf_core_dlkm.ko
+loaded	101944	spi-msm-geni.ko
+loaded	23480	spmi-pmic-arb-debug.ko
+loaded	486104	sps_drv.ko
+loaded	62320	spss_utils.ko
+loaded	22536	stability_test.ko
+loaded	12392	stm_console.ko
+loaded	73544	stm_core.ko
+loaded	13776	stm_ftrace.ko
+loaded	15016	stm_heartbeat.ko
+loaded	53032	stm_nfc_i2c.ko
+loaded	13800	stm_p_ost.ko
+loaded	20648	stm_st54se_gpio.ko
+loaded	13528	stub_dlkm.ko
+loaded	135272	swr_ctrl_dlkm.ko
+loaded	57208	swr_dlkm.ko
+loaded	42888	swr_dmic_dlkm.ko
+loaded	39088	swr_haptics_dlkm.ko
+loaded	43352	sync_fence.ko
+loaded	323912	synx-driver.ko
+loaded	38368	sys_pm_vx.ko
+loaded	91432	sysmon_subsystem_stats.ko
+loaded	23280	thermal_config.ko
+loaded	50440	tz_log_dlkm.ko
+loaded	305096	ubwcp.ko
+loaded	36672	ucsi_glink.ko
+loaded	57824	usb_f_ccid.ko
+loaded	68760	usb_f_cdev.ko
+loaded	236688	usb_f_gsi.ko
+loaded	53408	usb_f_qdss.ko
+loaded	103592	v4l2loopback.ko
+loaded	704544	vl53l1.ko
+loaded	237776	wcd938x_dlkm.ko
+loaded	29616	wcd938x_slave_dlkm.ko
+loaded	272800	wcd939x_dlkm.ko
+loaded	29616	wcd939x_slave_dlkm.ko
+loaded	54904	wcd9xxx_dlkm.ko
+loaded	71160	wcd_core_dlkm.ko
+loaded	158320	wcd_usbss_i2c.ko
+loaded	83640	wlan_firmware_service.ko
+loaded	96624	wsa883x_dlkm.ko
+loaded	144672	wsa884x_dlkm.ko

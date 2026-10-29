@@ -1,0 +1,16 @@
+# MEIZU 21 Pro — kernel release string ("so" version) facts
+# The 21 Pro stock kernel is a GKI android14-6.1 build; the release string below
+# is what `uname -r` reports on the stock device and what the GKI build must match.
+
+kernel_release      = 6.1.25-android14-11-maybe-dirty
+kmi                 = 6.1.25-android14-11
+android_release     = 14
+kernel_version      = 6.1.25
+os_patch_level      = 2023-10
+localversion_note   = "-maybe-dirty" comes from the vendor build; the AOSP ACK build
+                      produces "6.1.25-android14-11" and CI appends the version string
+                      passed via the `version` workflow input.
+security_patch      = 2023-10 (GKI branch deprecated/android14-6.1-2023-10)
+
+# Module vermagic expected by vendor modules
+vermagic            = 6.1.25 SMP preempt mod_unload modversions aarch64

@@ -1,0 +1,55 @@
+# MEIZU 21 Pro (M2481 / SM8650 Pineapple) boot.img header v4
+# Measured from the stock image. Offsets are the AOSP boot_img_hdr_v3 layout.
+#
+# First 64 bytes of the stock boot.img, decoded as little-endian u32 -- the
+# offset column below is authoritative:
+#   [ 0] ANDROID!          magic
+#   [ 8] 0x02052a00        kernel_size = 33892864
+#   [12] 0x00000000        kernel_addr = 0x0
+#   [16] 0x1c00017a        os_version   <-- os_version lives at [16], NOT [0] or [24]
+#   [20] 0x00000630        header_size = 1584
+#   [24] 0x00000000        reserved[0]
+#   [40] 0x00000004        header_version = 4
+#   [44] ""                cmdline (empty string)
+#   [$1580] 0x00000000     signature_size = 0
+#
+# Format: key=value, one per line, '#' starts a comment. Do NOT quote values.
+magic=ANDROID!
+file_size=100663296
+header_version=4
+header_size=1584
+page_size_field=0
+kernel_size=33892864
+kernel_offset=4096
+kernel_addr=0x0
+ramdisk_size=0
+ramdisk_addr=0x0
+os_version=0x1c00017a
+os_version_decoded=14.0.0/2023-10
+cmdline=
+signature_size=0
+kernel_release=6.1.25-android14-11-maybe-dirty
+
+# NOTE on page_size_field=0
+# This is the MEASURED value, not a read error. In boot header v3/v4 the legacy
+# v0 "page_size" field is deprecated and written as 0 by mkbootimg. Do not
+# "fix" it, and do not use it to compute offsets -- use kernel_offset=4096,
+# derived as 2048 + ceil(header_size/2048)*2048 = 2048 + 2048.
+
+# --------------------------------------------------------------------------
+# Supporting partitions (measured, for the record -- not part of boot header)
+#
+# init_boot.img : separate partition holding the GENERIC ramdisk, no kernel.
+#   file_size=8388608  header_version=4  header_size=1584  ramdisk_size=2131377
+#
+# vendor_boot.img : VNDRBOOT v4, page 4096, hdr_size 2128,
+#   ramdisk 9706817 B, dtb 1171449 B,
+#   cmdline contains video=vfb:640x400,bpp=32,memsize=3072000 ... bootconfig
+#   *** The vendor ramdisk payload is OBFUSCATED (the cpio header is intact but
+#   its index/data are replaced) -- modules cannot be extracted from it. Do NOT
+#   try, and do NOT commit it. Modules come from vendor_dlkm + system_dlkm. ***
+#
+# vendor_dlkm.img : EROFS, 26591232 B, 304 .ko  -> vendor_dlkm_modules.txt
+# system_dlkm.img : EROFS,  3604480 B,  57 .ko
+# The .ko bodies are NOT stored in this repository (see .gitignore).
+# --------------------------------------------------------------------------
