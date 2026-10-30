@@ -142,7 +142,7 @@ on:
         description: "设备事实目录（原厂 config / KMI 基准 / AVB 模板）"
         required: false
         type: string
-        default: "device/meizu21pro"
+        default: "MEIZU 21pro/device"
 
 jobs:
   build-kernel:
@@ -1406,7 +1406,7 @@ jobs:
           #   源码根解析的, 写相对路径必然找不到文件, 然后整份白名单失效 -> 符号被裁光。
           # ============================================================
           TRIM_WANT="y"
-          KSYMS_RAW="$GITHUB_WORKSPACE/${DEVICE_DIR:-device/meizu21pro}/vmlinux_abi_symbollist.raw"
+          KSYMS_RAW="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/vmlinux_abi_symbollist.raw"
           echo "TRIM_UNUSED_KSYMS=$TRIM_WANT"
           echo "KMI 白名单: $KSYMS_RAW"
           if [ ! -f "$KSYMS_RAW" ]; then
@@ -1442,7 +1442,7 @@ jobs:
           TRIM_WANT="${{ inputs.trim_unused_ksyms }}"
           echo "TRIM_UNUSED_KSYMS = $TRIM_WANT"
           if [ "$TRIM_WANT" = "y" ]; then
-            KSYMS_RAW="$GITHUB_WORKSPACE/${DEVICE_DIR:-device/meizu21pro}/vmlinux_abi_symbollist.raw"
+            KSYMS_RAW="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/vmlinux_abi_symbollist.raw"
             if [ ! -f "$KSYMS_RAW" ]; then
               echo "::error title=缺少 KMI 白名单::$KSYMS_RAW 不存在"
               exit 1
@@ -1673,7 +1673,7 @@ jobs:
           [ -d "$COMMON/mm" ] || COMMON="$KERNEL_ROOT"
           echo "内核源码根: $COMMON"
           mkdir -p "$GITHUB_WORKSPACE/build-logs"
-          PATCH="$GITHUB_WORKSPACE/${DEVICE_DIR:-device/meizu21pro}/patches/01-m2481-ko-krcrc-and-onemind.patch"
+          PATCH="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/patches/01-m2481-ko-krcrc-and-onemind.patch"
           if [ ! -f "$PATCH" ]; then
             echo "::warning title=跳过 kit 补丁::缺 $PATCH"
             exit 0
@@ -1995,7 +1995,7 @@ jobs:
         run: |
           set -e
           : "${KERNEL_ROOT:=$GITHUB_WORKSPACE/$CONFIG}"
-          STOCK="$GITHUB_WORKSPACE/${DEVICE_DIR:-device/meizu21pro}/stock_Module.symvers"
+          STOCK="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/stock_Module.symvers"
           [ -f "$STOCK" ] || { echo "::error title=缺 KMI 基准::$STOCK 不存在"; exit 1; }
           BUILT=""
           for c in "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64/Module.symvers" \
@@ -2020,7 +2020,7 @@ jobs:
              || grep -q '^CONFIG_TRIM_UNUSED_KSYMS=y' "$DEFCONFIG" 2>/dev/null; then
             MISSING_IN_BIN=$(grep -cvE '^$' /dev/null || true)
             if [ -f "$BUILT" ]; then
-              WL="$GITHUB_WORKSPACE/${DEVICE_DIR:-device/meizu21pro}/vmlinux_abi_symbollist.raw"
+              WL="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/vmlinux_abi_symbollist.raw"
               if [ -f "$WL" ]; then
                 # 白名单里有多少符号没出现在编译产物的 Module.symvers 里
                 WL_N=$(grep -c . "$WL" || true)
@@ -2353,7 +2353,7 @@ jobs:
       #   克隆原厂 4096 字节 Boot Header v4 -> 写新 Image -> payload 末尾注入 AVB0
       #   -> EOF-64 注入 AVBf。AVB0 偏移从模板 AVBf Footer 动态解析，不硬编码。
       #
-      # 模板 = device/meizu21pro/avb_template/stock_boot_skeleton.img.zlib
+      # 模板 = MEIZU 21pro/device/avb_template/stock_boot_skeleton.img.zlib
       #   原厂 boot.img 的稀疏骨架（96MB 布局保真，payload 清零，zlib 后 ~98KB）。
       #   等价性已验证：用骨架与用真原厂 boot.img 打包，产出逐字节相同（diff=0）。
       #
@@ -2367,7 +2367,7 @@ jobs:
           PART_SIZE=$((96 * 1024 * 1024))          # 原厂 boot 分区 = 100663296
           OUT="boot.img"
 
-          TPL_DIR="$GITHUB_WORKSPACE/${DEVICE_DIR:-device/meizu21pro}/avb_template"
+          TPL_DIR="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/avb_template"
           TPL="$TPL_DIR/stock_boot_skeleton.img.zlib"
           TPL_SHA_FILE="$TPL_DIR/stock_boot_skeleton.sha256"
           SOURCE_TXT="$TPL_DIR/source.txt"
@@ -2378,7 +2378,7 @@ jobs:
             [ -f "$f" ] || { echo "::error title=缺少 AVB 打包脚本::$f 不存在, 拒绝产出无 AVB 的 boot.img"; exit 1; }
           done
           for f in "$TPL" "$TPL_SHA_FILE" "$SOURCE_TXT"; do
-            [ -f "$f" ] || { echo "::error title=缺少 AVB 模板文件::$f 不存在。见 device/meizu21pro/avb_template/README.md"; exit 1; }
+            [ -f "$f" ] || { echo "::error title=缺少 AVB 模板文件::$f 不存在。见 MEIZU 21pro/device/avb_template/README.md"; exit 1; }
           done
 
           # ---- sha256 完整性 ----

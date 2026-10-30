@@ -82,3 +82,23 @@ Module.symvers
 build-logs/
 patch-rejects/
 
+# 双机型目录下的设备事实必须入库（不被 *.txt / *.symvers / *.img 规则吃掉）
+!MEIZU 21pro/device/
+!MEIZU 21pro/device/**
+!MEIZU 21pro/device/**/*.txt
+!MEIZU 21pro/device/**/*.config
+!MEIZU 21pro/device/**/*.symvers
+!MEIZU 21pro/device/**/*.raw
+!MEIZU 21pro/device/**/*.patch
+!MEIZU 21pro/device/**/*.zlib
+!MEIZU 21pro/device/**/*.sha256
+!魅族21/
+!魅族21/**
+!魅族21/device/**
+!魅族21/device/**/*.txt
+!魅族21/device/**/*.config
+!魅族21/device/**/*.symvers
+!魅族21/device/**/*.raw
+!魅族21/device/**/*.patch
+!魅族21/device/**/*.zlib
+!魅族21/device/**/*.sha256

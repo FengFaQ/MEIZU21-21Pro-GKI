@@ -1,51 +1,28 @@
-name: 21 Pro 内核构建 (FinaSU + SUSFS, android14-6.1.25)
+name: 魅族 21 内核构建 (FinaSU + SUSFS, android14-6.1.25)
 
 # ============================================================================
-# 目标机型: 魅族 21 Pro (M2481 / SM8650 Pineapple)
-# 基线: GKI android14-6.1 / sub_level 25 / os_patch 2023-10
-#   —— 必须与原厂一致, 不跳版本。跳版本会改 struct zone / struct lruvec 的
-#      字段偏移, 而魅族闭源模块是按字节偏移直接访问的 -> 开机即崩。
+# 目标机型: 魅族 21 (M2461 / SM8650 Pineapple)
+# 基线: GKI android14-6.1 / sub_level 25 / os_patch 2023-10 (与 21 Pro 相同)
 # ============================================================================
 #
-# ## 管理器 APK 绑定方式（用户指定的方案）
+# 与「MEIZU 21pro」工作流的差异只有 4 处:
+#   1. device_dir   : 魅族21/device      (21 的设备事实 / KMI 基准 / AVB 模板)
+#   2. release 标签 : meizu21-finatsu-N  (21 Pro 是 meizu21pro-finatsu-N)
+#   3. latest 标签  : meizu21-latest
+#   4. dist 分支    : dist-meizu21       (不能覆盖 21 Pro 的 dist)
 #
-# **所有涉及网络的步骤（拉 APK、提取证书）全部在 CI 里做，不在本地做。**
-# 理由: CI 的网络环境比本地好得多, 拉取快、提取稳定。
+# 其余（管理器 APK 绑定、三道门禁、AVB0+AVBf 注入、kit 补丁）完全复用
+# .github/workflows/build.yml，两机型共享同一条流水线。
 #
-# 流程:
-#   job1 fetch-manager : gh release download 拉 FinaSU 官方最新 APK
-#                        -> scripts/finasu_compat/extract_manager_cert.py 提取证书
-#                        -> 输出 cert_size / cert_hash / apk_name / apk_sha256
-#   job2 build-kernel  : 用 cert_size/cert_hash 编进内核第二信任槽
-#                        (KSU_EXPECTED_SIZE2 / KSU_EXPECTED_HASH2)
-#   job3 release       : 内核产物 + **这一版 GKI 编译时所用的那份 APK** 一起上传
-#
-# 为什么不用自己编 APK:
-#   1. 不需要管理 keystore / secrets
-#   2. 证书哈希与上传的 APK 天然同源（同一个 job 算、同一个 artifact 传），不可能错配
-#   3. FinaSU 升级零改代码（finasu_ref 留空 = 自动取 latest）
-#
-# ⚠ ksu_cert_size / ksu_cert_hash 是 build.yml 的 workflow_call input，
-#   不受 workflow_dispatch 的 10 个上限限制，**不要**做成 dispatch input。
-#
-# ⚠ 用户必须安装本 release 附带的那个 APK。内核里编的是它的证书哈希，
-#   装别的版本 -> 管理器认不到内核。
-# ============================================================================
-#
-# ## 刷入
-# 只替换 boot 分区，系统仍是原厂 Flyme。boot.img 已注入原厂 AVB0 + AVBf
-# （魅族 ABL 即使 BL 解锁也强制校验这两块，缺了必回 Fastboot）。
+# ## 管理器 APK 绑定
+# 所有网络操作在 CI 内完成: job1 拉 FinaSU 官方 APK 并提取证书 ->
+# job2 用该证书编进内核第二信任槽 -> job3 把内核产物与这份 APK 一起上传。
+# 用户必须安装 release 附带的那份 APK，否则管理器认不到内核。
 #
 # ## 触发
-# 只有 workflow_dispatch（手动）。可复用 workflow 的 job 级 if 不能用
-# success()/failure()，push 上下文展开时也无法解析跨 job outputs ——
-# 历史上 push 触发的 run 全部 0 job 直接失败(run 1/2/3/17 实测)。
-#
-# ⚠ workflow_dispatch.inputs 上限 10 个（GitHub 硬限制）。超限不报语法错，
-#   但 GitHub 拒绝注册整个 workflow：列表里名字变路径 / dispatch 永远 422 /
-#   push 出来的 run 是 0 job。当前 6 个，留 4 个余量。
+# 只有 workflow_dispatch（手动）。workflow_dispatch.inputs 上限 10 个，
+# 当前 6 个。
 # ============================================================================
-
 permissions:
   contents: write
   actions: write
@@ -104,7 +81,7 @@ on:
 
 # 同一分支串行，避免两次构建同时写 release / force-push dist 互相覆盖
 concurrency:
-  group: meizu21pro-${{ github.ref }}
+  group: meizu21-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -291,7 +268,7 @@ jobs:
       artifact_upload_mode: '上传全部'
       # 设备事实目录固定（单机型）。若以后要支持第二机型（21 / M2461），
       # 再把它改成 dispatch input 并相应精简其它 input。
-      device_dir: 'device/meizu21pro'
+      device_dir: '魅族21/device'
       # TRIM_UNUSED_KSYMS 默认 n（不裁剪）。
       # run#23 实测：=y + 白名单会在 kleaf 的
       #   Checking for kmi_symbol_list_strict_mode ... failed
@@ -318,7 +295,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
-      # 必须 checkout：要读 device/meizu21pro 下的设备事实写 release notes
+      # 必须 checkout：要读 魅族21/device 下的设备事实写 release notes
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -414,7 +391,7 @@ jobs:
         run: |
           set -euo pipefail
           RUN="${{ github.run_number }}"
-          TAG="meizu21pro-finatsu-${RUN}"
+          TAG="meizu21-finatsu-${RUN}"
 
           cat > notes.md <<EOF
           GKI android14-6.1.25 / os_patch 2023-10 / LTO=none / FinaSU + SUSFS
@@ -466,23 +443,23 @@ jobs:
           echo "已创建 release: $TAG"
 
           # latest 别名（覆盖式）
-          if gh release view meizu21pro-latest >/dev/null 2>&1; then
-            gh release delete meizu21pro-latest --yes --cleanup-tag || true
+          if gh release view meizu21-latest >/dev/null 2>&1; then
+            gh release delete meizu21-latest --yes --cleanup-tag || true
           fi
-          gh release create meizu21pro-latest --prerelease \
+          gh release create meizu21-latest --prerelease \
             --title "21Pro GKI (latest)" --notes-file notes.md publish/* || true
           echo "已更新 latest 别名"
 
-      - name: 推送 dist 分支（产物留档）
+      - name: 推送 dist-meizu21 分支（21 线产物留档，不覆盖 21 Pro 的 dist）
         run: |
           set -euo pipefail
           cd publish
           git init -q
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -q -b dist
+          git checkout -q -b dist-meizu21
           git add -A
           git commit -q -m "dist: run ${{ github.run_number }}"
           git push --force \
-            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" dist
-          echo "dist 分支已更新"
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" dist-meizu21
+          echo "dist-meizu21 分支已更新"
