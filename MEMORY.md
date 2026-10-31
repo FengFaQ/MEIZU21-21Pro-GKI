@@ -234,6 +234,25 @@ meizu21 独有              : 0 个
 **教训**：改 `build.yml` 时，任何出现 `meizu21pro` / `6.1.25-android14-11-maybe-dirty`
 的地方都要问一句「这是 21 Pro 专属的吗？」。能用 `DEVICE_DIR` 推的就别写死。
 
+### 7.1 同一个问题第二轮（2026-10-31，commit `3d5df57`）
+
+上一轮只修了「门禁 1 写死版本串」，**没发现 `DEVICE_DIR` 根本没赋值** ——
+所以那次「改成从 `$DEVICE_DIR/so.txt` 读」其实是无效改动：变量为空时
+`${DEVICE_DIR:-MEIZU 21pro/device}` 一律落到 21 Pro 目录。
+魅族 21 若直接跑，会拿着 21 Pro 的 KMI 基准 / 原厂 config / AVB 模板去编译。
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 25 | 所有设备事实路径都是 21 Pro 的 | **`workflow_call` 的 `with:` 参数不会自动进 step 的 `env`**。`DEVICE_DIR` 只在 input 里声明，从未 `export`，于是 8 处 `${DEVICE_DIR:-MEIZU 21pro/device}` 全部走兜底 | 统一改 `${DEVICE_DIR:?device_dir not set}`，缺失即中止 |
+| 26 | 21 会在「配置内核选项」硬失败 | 步骤开头残留 `TRIM_WANT="y"` + 缺白名单 `exit 1` 的**死代码断言**（后面才用 `inputs.trim_unused_ksyms` 覆盖）；21 没有 `vmlinux_abi_symbollist.raw`，21 Pro 有所以一直没人发现 | 断言改为跟 input 走 |
+| 27 | 门禁 1 对 21 Pro 一直静默失效 | 两份 `so.txt` 写法不同：`kernel_release=...` vs `kernel_release      = ...`。原正则只认无空格写法 | 用 `kernel_release[[:space:]]*=[[:space:]]*` |
+| 28 | 设备目录问题伪装成「版本串不符」 | 上面的错法都指向门禁 1 | 新增「校验设备事实目录 (device_dir)」前置步骤，checkout 后立刻断言 |
+
+**方法论（与 §9 同类，这是第三次了）**：
+「变量为空 → 走兜底」在跨机型流水线里等于**悄悄用错机型**，比直接报错危险得多。
+**任何 `${VAR:-<某个具体机型>}` 都是定时炸弹**，应改成 `${VAR:?...}`。
+另外，写断言前先确认它是不是死代码（后面有没有被覆盖）——坑 26 就是断言和实际取值自相矛盾。
+
 ---
 
 ## 8. 环境事实（本机）
@@ -243,11 +262,25 @@ meizu21 独有              : 0 个
 | 工作副本 | `C:\Step\work\gki-rebuild`（branch `main`） |
 | 远端 | `git@github.com:FengFaQ/MEIZU21-21Pro-GKI.git`（GitHub 不允许空格，所以仓库名不是「MEIZU 21/21pro GKI」） |
 | 分析脚本 / 日志 | `C:\Step\work\gki-pro` |
+| CI 监控脚本 | `C:\Step\work\gki-pro\mon21\watch.py`（每 45 秒轮询，打印逐步骤进度） |
 | PAT | `C:\Users\Administrator\.ssh\GITHUB_CREDENTIALS.md`（已验证 `admin=True push=True`） |
 | SSH key 口令 | `162636` |
 | 21 Pro 12.7 线刷包 | `C:\12.7` |
 | 魅族 21 12.6 线刷包 | `C:\Step\flyme12.6` |
 | 21 Pro 原厂 boot 备份 | `C:\Step\work\gki-pro\backup\boot_stock_21pro.img` |
+
+### 网络通道（2026-10-31 实测，**先看这个再去折腾命令**）
+
+| 通道 | 状态 |
+|---|---|
+| Windows `Invoke-RestMethod` / `curl.exe` → api.github.com | ❌ TLS 握手失败：`SEC_E_NO_CREDENTIALS` / 「安全包中没有可用的凭证」。系统时间正常（UTC 对过），是 schannel 凭据库问题，不是时钟/代理 |
+| `git push` → `github.com:22` | ❌ `Connection closed by … port 22` |
+| **WSL `curl` → api.github.com** | ✅ **可用，一律走这条** |
+| **`git push` → `ssh.github.com:443`** | ✅ 可用，需显式指定私钥 + askpass 口令 |
+
+> PowerShell 控制台是 GBK 代码页，`Get-Content` 看仓库里的中文文件会显示成乱码，
+> **但文件本身是干净的 UTF-8**（`file` 已确认）。审代码用 WSL 的 `cat`/`sed`，
+> 不要因为控制台乱码就以为文件坏了、去「修」它。
 
 ### 镜像速查（**刷错就砖**）
 
