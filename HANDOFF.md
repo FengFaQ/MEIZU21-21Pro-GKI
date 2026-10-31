@@ -31,8 +31,8 @@ LTO = none
 |---|---|---|
 | 设备事实 `device/` | ✅ 齐全（13 个文件） | ✅ 齐全（13 个文件） |
 | AVB 骨架等价性 | ✅ `repack(原厂Image) == 原厂 boot.img`，diff = 0 | ✅ 同左，diff = 0 |
-| 工作流 | ✅ 已跑通 **run#24 全绿** | ✅ **run#11 全绿**（三道门禁全过，产物已发布） |
-| release 产物 | ✅ `meizu21pro-finatsu-24` / `meizu21pro-latest` | ✅ `meizu21-finatsu-11` / `meizu21-latest` |
+| 工作流 | ✅ 已跑通 **run#24 全绿** | ✅ **run#14 全绿**（三道门禁全过，5 个 NEED 符号已补齐） |
+| release 产物 | ✅ `meizu21pro-finatsu-24` / `meizu21pro-latest` | ✅ `meizu21-finatsu-14` / `meizu21-latest` |
 | 真机刷入验证 | ❌ **未做** | ❌ 未做 |
 | 管理器 APK 绑定 | ✅ FinaSU `v1.3.2`（cert `0x02cc`） | ✅ 复用同一套 CI 逻辑 |
 
@@ -432,3 +432,76 @@ release `meizu21-finatsu-11` 与 `meizu21-latest`，`dist-meizu21` 分支已建�
 
 **下一件事**：拿 `boot.img` 跑 `/mnt/c/Step/work/gki-pro/FLASH_SOP.md` §1.4 的 `audit_boot.py`，
 全 OK 后**只刷非活动槽**验证开机、Root、管理器识别、SUSFS。
+
+---
+
+## 14. run#14 全绿 —— 补齐 5 个厂商 NEED 符号（2026-10-31）
+
+**commit `344e201`，run 41177176666，三个 job 全部 success。**
+这是**应该刷的版本**（run#11 虽全绿但缺 5 个厂商模块真正需要的符号）。
+
+### 与 run#11 的差别
+
+| 项 | run#11 (`b7e1a68`) | run#14 (`344e201`) |
+|---|---|---|
+| Missing stock symbols | 16 | **6** |
+| Raw CRC matches | 6325 / 6501 | **6329 / 6501** |
+| 5 个 NEED 符号 | ❌ 缺 | ✅ 已导出 |
+| kCFI | 18/18 MATCH | 18/18 MATCH |
+
+**剩余 6 个缺失符号已逐个 grep 确认「不在 NEED 列表」**，不影响开机：
+`__tracepoint_/__traceiter_{android_vh_binder_alloc, android_vh_binder_ioctl}`、
+`scsi_execute_cmd_len`、`wait_spam_info`。
+
+### 新增 `scripts/apply_kmi_exports.py`
+
+只做 kit patch 里"补导出符号"那部分，不碰 OneMind / kCFI 保活：
+
+| 文件 | 动作 |
+|---|---|
+| `drivers/android/vendor_hooks.c` | `MZ_DEFINE_VH(android_vh_smartzram_tune_swappiness)`（AOSP 无此 hook，需自造） |
+| `drivers/base/power/wakeup.c` | `EXPORT_SYMBOL_GPL(pm_system_irq_wakeup)` |
+| `mm/memcontrol.c` | 新增 `mem_cgroup_id_put2()` + 导出 |
+| `mm/vmscan.c` | `shrink_{inactive,active}_list` / `shrink_list` 去 static；导出 4 个 + `EXPORT_TRACEPOINT_SYMBOL_GPL(mm_vmscan_kswapd_wake)` |
+
+### ⚠ 三处踩过的坑（**都只在 21 上暴露**）
+
+1. **`mm_vmscan_kswapd_wake` 不能用 `MZ_DEFINE_VH`** —— 它是 AOSP 已有的真实
+   `TRACE_EVENT`（`include/trace/events/vmscan.h:66`）。自己再造
+   `int __traceiter_...(void *__data)` 会与 `tracepoint.h:415` 的
+   `extern int __traceiter_...(void*,int,int,int)` 冲突 → 编译失败。
+2. **`EXPORT_TRACEPOINT_SYMBOL_GPL` 必须放在 `CREATE_TRACE_POINTS` 单元** ——
+   它展开成 `__tracepoint_##name` / `__traceiter_##name` / `__SCK__tp_func_##name`，
+   要求这些标识符在**本 TU** 可见。放 `vendor_hooks.c`（只 include
+   `trace/hooks/*.h`）会报 3 个 undeclared。
+   **正确位置是 `mm/vmscan.c`**（第 70-71 行就是
+   `#define CREATE_TRACE_POINTS` + `#include <trace/events/vmscan.h>`），
+   与 21 Pro kit patch 第 679 行一致。
+3. **`mem_cgroup_id_put` 在 6.1 是 `static inline`** —— 锚点用
+   `void mem_cgroup_id_put(` 能子串命中（`static inline ` 在前），
+   新函数 `mem_cgroup_id_put2()` 插在它后面时，`mem_cgroup_id_put_many()`
+   （第 5167 行，`static`）在作用域内，可编译。
+
+### 两个仍未解决的问题（**不影响本次刷机**）
+
+1. **`__kcrctab` 二进制锁定未执行**：`[WARN] Could not locate struct kernel_symbol
+   for 'module_layout' in Image.` —— `sync_image_kcrctab()` 靠
+   `\0module_layout\0` 字符串回溯定位，在本次 Image 上失败。
+   本次 CRC 正确是**因为源码层导出的 CRC 本身就对**，不是靠二进制覆写。
+   这条兜底路径仍断着，将来若源码 CRC 出现偏差就失去保护。
+   真要修，得改用 `__ksymtab` 符号名表 + 段地址硬定位，别再用字符串启发式。
+2. **`apply_kit_onemind.py` 的「自检 2: 内核版本串」是空转的**：
+   它查 `$KERNEL_ROOT/common/include/generated/utsrelease.h`，但 kleaf 不生成该文件
+   （产物在 bazel out/），所以永远 `WARN ... 跳过版本串断言`。
+   **kit 步骤那句 `RESULT: OK` 里的版本串断言不可信**，真正的校验只有门禁 1/3
+   （门禁 1 本身是对的，已连续两轮通过）。
+
+### 可选加固
+
+`strict_kcfi` 可以置 `true`：run#11 与 run#14 连续两轮 **18/18 MATCH**，
+`cfi_unverified.txt` 中"未验证"项都是 N/A 型（`do_shrink_slab` 等本就无 expected 值）。
+
+### 下一步
+
+拿 `meizu21-finatsu-14` 的 `boot.img` 跑 `FLASH_SOP.md` §1.4 的 `audit_boot.py`，
+全 OK 后**只刷非活动槽**，验证开机 / Root / 管理器识别 / SUSFS。
