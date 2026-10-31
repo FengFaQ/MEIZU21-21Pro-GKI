@@ -300,21 +300,53 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.ccache
-          key: ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-${{ github.sha }}
+          # 与 bazel 缓存同理：key 里带 device_dir + github.repository + v2，
+          # 避免沿用旧仓库/另一机型的产物（ccache 按内容哈希，风险低于 bazel，
+          # 但换 key 的成本只是首次构建慢一点，没有理由冒这个险）。
+          key: ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-${{ inputs.device_dir }}-${{ github.repository }}-v2-${{ github.sha }}
           restore-keys: |
-            ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-
+            ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-${{ inputs.device_dir }}-${{ github.repository }}-v2-
 
       # 仅 6.1+ 走 bazel 构建，持久化 --disk_cache 目录以加速后续构建
+      # ------------------------------------------------------------------
+      # ⚠ run#2 实测教训：bazel 磁盘缓存里会留下【绝对路径】。
+      #   hermetic-tools 的 `tar` 包装脚本就写死了
+      #     /home/runner/work/<repo>/<repo>/<config>/prebuilts/build-tools/linux-x86/bin/toybox
+      #   一旦路径变了（仓库改名 / 目录名不同），复用该缓存就会
+      #     tar: 3: .../toybox: not found  -> Exit 127 -> UAPI headers 构建失败。
+      #   run#2 命中的是 21 Pro 在【旧仓库名 MEIZU21PRO_GKI】下产生的缓存。
+      #
+      # 因此 cache key 里必须带：
+      #   1. 仓库标识 github.repository —— 仓库改名/换仓后自然失效
+      #   2. 机型标识 device_dir        —— 两机型不共用同一份缓存
+      #   3. CACHE_SCHEMA              —— 语义变更时手动升版，强制重建
+      # 代价只是首次构建慢，比「命中一份坏缓存后花式报错」划算。
       - name: 恢复 bazel 磁盘缓存
         if: inputs.android_version != 'android12' && inputs.android_version != 'android13'
         uses: actions/cache@v5
         with:
           path: ~/.cache/bazel
-          key: ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-bazel-${{ github.sha }}
+          key: ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-bazel-${{ inputs.device_dir }}-${{ github.repository }}-v2-${{ github.sha }}
           restore-keys: |
-            ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-bazel-
-            ${{ inputs.android_version }}-${{ inputs.kernel_version }}-bazel-
-          
+            ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-bazel-${{ inputs.device_dir }}-${{ github.repository }}-v2-
+
+      # 清掉可能残留的错误绝对路径（防御性；正常情况下 key 已隔离，不会命中）
+      - name: 校验 bazel 缓存不含他仓绝对路径
+        if: inputs.android_version != 'android12' && inputs.android_version != 'android13'
+        run: |
+          set -e
+          HIT="$HOME/.cache/bazel"
+          [ -d "$HIT" ] || { echo "无 bazel 缓存目录，跳过"; exit 0; }
+          BAD=$(grep -rIl 'MEIZU21PRO_GKI' "$HIT" 2>/dev/null | head -5 || true)
+          if [ -n "$BAD" ]; then
+            echo "::warning title=bazel 缓存含旧仓库绝对路径::命中了他仓缓存，清空 ~/.cache/bazel 后重建（只是慢，不影响正确性）"
+            printf '%s\n' "$BAD" | sed 's/^/    /'
+            find "$HIT" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+            echo "  已清空 $HIT"
+          else
+            echo "OK: bazel 缓存未发现旧仓库路径"
+          fi
+
       - name: 缓存工具链
         id: cache-toolchain
         uses: actions/cache@v5
