@@ -515,7 +515,14 @@ jobs:
             APK_PUB="${APK_NAME}"
             MAN_PUB="MANAGER_INFO.txt"
           fi
-          mv -v "publish/${APK_NAME}" "publish/${APK_PUB}"
+          # ⚠ FinaSU 线上 APK_PUB == APK_NAME，直接 mv 会让 mv 报
+          #   "are the same file" 并返回非 0，在 set -e 下中断整个发布步骤。
+          #   只有真的改名（BakaSU 线）时才 mv。
+          if [ "$APK_PUB" != "$APK_NAME" ]; then
+            mv -v "publish/${APK_NAME}" "publish/${APK_PUB}"
+          else
+            echo "APK 名无需改名: ${APK_NAME}"
+          fi
 
           {
             echo "manager_variant=${MANAGER_VARIANT}"

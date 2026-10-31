@@ -18,11 +18,29 @@ BRAND=$(echo 'TXVMaW5n' | base64 -d)
 
 apply_bakasu() {
   local kbuild="$KSU_DIR/kernel/Kbuild"
-  if [ -f "$kbuild" ]; then
-    local pat=$(echo "${PATTERNS[bakasu]}" | base64 -d)
-    sed -i "s/^${pat}\$/REPO_NAME := ${BRAND}/" "$kbuild"
-    git -C "$KSU_DIR" update-index --skip-worktree kernel/Kbuild
+  [ -f "$kbuild" ] || return 0
+
+  # ⚠ 不能只按 `REPO_NAME := BakaSU` 精确匹配。
+  #   实测 BakaSU 各 ref 的取值不同：
+  #     v4.2.0-rc3（当前钉住的版本）-> REPO_NAME := ReSukiSU
+  #     main                        -> REPO_NAME := BakaSU
+  #   原来的 sed 在 rc3 上匹配 0 次且不报错，品牌名会静默保留成 ReSukiSU。
+  #   这里改为「匹配任意取值的 REPO_NAME 行」，并在改完后断言确实变成了 BRAND。
+  local before after
+  before=$(grep -cE '^REPO_NAME[[:space:]]*:?=[[:space:]]*' "$kbuild" || true)
+  if [ "${before:-0}" -eq 0 ]; then
+    echo "  WARN: $kbuild 里找不到 REPO_NAME 行，跳过品牌名改写（上游结构可能已变化）"
+    return 0
   fi
+
+  sed -i -E "s|^REPO_NAME[[:space:]]*:?=[[:space:]]*.*\$|REPO_NAME := ${BRAND}|" "$kbuild"
+  after=$(grep -cE "^REPO_NAME[[:space:]]*:?=[[:space:]]*${BRAND}\$" "$kbuild" || true)
+  if [ "${after:-0}" -eq 0 ]; then
+    echo "  WARN: REPO_NAME 改写后未变成 ${BRAND}，请检查 $kbuild"
+  else
+    echo "  OK: REPO_NAME -> ${BRAND} ($(grep -nE '^REPO_NAME' "$kbuild" | head -1))"
+  fi
+  git -C "$KSU_DIR" update-index --skip-worktree kernel/Kbuild 2>/dev/null || true
 }
 
 apply_sukisu() {
