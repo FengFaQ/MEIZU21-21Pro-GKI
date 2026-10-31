@@ -35,6 +35,7 @@
 import argparse
 import io
 import os
+import re
 import sys
 
 MARK = "MZ_KIT_P4"
@@ -443,26 +444,51 @@ def apply_vmscan(p):
 
     # (b) MGLRU: sort_folio -> memcg_filepages_protect
     #     原厂在 sort_folio 里询问是否绕过回收，保护 600MB 系统核心文件缓存
+    #
+    # ⚠ run#4 实测（魅族21，无 kit patch 的干净 ACK 6.1.25 树）：
+    #   此处锚点曾经写成【单行】：
+    #       static bool sort_folio(struct lruvec *lruvec, struct folio *folio, int tier_idx)\n{\n
+    #   但 6.1 的真实定义是【跨两行】且多一个 struct scan_control *sc 参数：
+    #       static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_control *sc,
+    #                              int tier_idx)
+    #       {
+    #   于是 count==0 -> p.fail() -> 整个注入链中断 -> 门禁 2 的 16 个
+    #   OneMind hook 全缺。21 Pro 之所以没暴露这个问题，是因为它的 kit patch
+    #   会先完成注入，脚本走到 "已打过" 分支就直接跳过，永远走不到这段锚点。
+    #   锚点以正则匹配，容忍两行、参数与空白差异。
     if "trace_android_vh_memcg_filepages_protect" in src:
         p.note("  跳过(已打过): %s (memcg_filepages_protect)" % rel)
     else:
-        # 6.1 真实签名: static bool sort_folio(struct lruvec *lruvec, struct folio *folio, int tier_idx)
-        anchor = "static bool sort_folio(struct lruvec *lruvec, struct folio *folio, int tier_idx)\n{\n"
-        if src.count(anchor) == 1:
-            mz_block = ("\t/* %s: OneMind mz_mm_protect 保护系统核心文件缓存免被驱逐 */\n"
-                        "\tbool mz_bypass = false;\n"
-                        "\n"
-                        "\t/* file=1 表示文件页; 厂商回调可置 bypass=true 跳过本轮回收 */\n"
-                        "\ttrace_android_vh_memcg_filepages_protect(lruvec, folio_test_file(folio) ? 1 : 0,\n"
-                        "\t\t\t\t\t\t &mz_bypass);\n"
-                        "\tif (mz_bypass)\n"
-                        "\t\treturn false;\n"
-                        "\n" % MARK)
-            src = src.replace(anchor, anchor + mz_block, 1)
+        pat = re.compile(
+            r"^static bool sort_folio\(\s*struct lruvec \*lruvec,\s*"
+            r"struct folio \*folio,\s*struct scan_control \*sc,\s*"
+            r"int tier_idx\)\s*\n\{\n",
+            re.M)
+        hits = list(pat.finditer(src))
+        if len(hits) == 1:
+            # 与 21 Pro kit patch 逐字节一致的注入方式：
+            #   · 函数开头加 `bool bypass = false;`
+            #   · 结尾 `return false;` 之前插入 hook 调用 + 回滚逻辑
+            #   （回归到 kit 里已验证过的形态，避免出现两种不同的语义）
+            src = src[:hits[0].end()] + "\tbool bypass = false;\n" + src[hits[0].end():]
+            hits = list(pat.finditer(src))
+            i = hits[0].end()
+            j = src.index("\n\treturn false;\n", i)
+            mz_block = ("\n"
+                        "\t/* %s: OneMind mz_mm_protect 保护系统核心文件缓存免被驱逐 */\n"
+                        "\ttrace_android_vh_memcg_filepages_protect(lruvec, type, &bypass);\n"
+                        "\tif (bypass && gen == lru_gen_from_seq(lrugen->min_seq[type])) {\n"
+                        "\t\tgen = folio_inc_gen(lruvec, folio, false);\n"
+                        "\t\tlist_move(&folio->lru, &lrugen->folios[gen][type][zone]);\n"
+                        "\t\treturn true;\n"
+                        "\t}\n" % MARK)
+            src = src[:j] + mz_block + src[j:]
             p.note("  已打: %s (sort_folio 的 memcg_filepages_protect 调用点)" % rel)
         else:
-            p.fail("%s 里 sort_folio 锚点出现 %d 次（6.1 应为 int tier_idx）"
-                   % (rel, src.count(anchor)))
+            p.fail("%s 里 sort_folio 锚点命中 %d 次（期望 1）。"
+                   "6.1 真实签名为两行："
+                   "static bool sort_folio(struct lruvec *lruvec, struct folio *folio, "
+                   "struct scan_control *sc, int tier_idx)" % (rel, len(hits)))
 
     if MARK + "_VMSCAN" not in src:
         if "trace/hooks/vmscan.h" not in src:
