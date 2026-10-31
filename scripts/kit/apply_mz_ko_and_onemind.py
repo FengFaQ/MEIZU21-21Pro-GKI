@@ -146,7 +146,10 @@ static void drop_slab_node(int nid)""",
         """unsigned long shrink_inactive_list(unsigned long nr_to_scan,
 \t\tstruct lruvec *lruvec, struct scan_control *sc,
 \t\tenum lru_list lru)""",
-        marker='unsigned long shrink_inactive_list(unsigned long nr_to_scan,'
+        # ⚠ 必须带行首 \n：'unsigned long shrink_inactive_list(...)' 是
+        #   'static unsigned long shrink_inactive_list(...)' 的子串，不加行首会在
+        #   打补丁前就命中 -> 误判已打过 -> 该改动被跳过。
+        marker='\nunsigned long shrink_inactive_list(unsigned long nr_to_scan,'
     )
 
     patch_file(
@@ -159,7 +162,7 @@ static void drop_slab_node(int nid)""",
 \t\t\t       struct lruvec *lruvec,
 \t\t\t       struct scan_control *sc,
 \t\t\t       enum lru_list lru)""",
-        marker='void shrink_active_list(unsigned long nr_to_scan,'
+        marker='\nvoid shrink_active_list(unsigned long nr_to_scan,'
     )
 
     patch_file(
@@ -168,7 +171,7 @@ static void drop_slab_node(int nid)""",
 \t\t\t\t struct lruvec *lruvec, struct scan_control *sc)""",
         """unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
 \t\t\t\t struct lruvec *lruvec, struct scan_control *sc)""",
-        marker='unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,'
+        marker='\nunsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,'
     )
 
     patch_file(
@@ -328,10 +331,23 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 
     patch_file(
         "mm/page_alloc.c",
-        """\tpage = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
+        # ⚠ 锚点必须带上「The adjusted alloc_flags might result in immediate
+        #   success」这段注释：`page = get_page_from_freelist(...); if (page)
+        #   goto got_pg;` 在 __alloc_pages_slowpath 里出现 **2 次**
+        #   （5193 与 5274，前者是首次快速尝试、后者是调整 zonelist 后重试），
+        #   不带注释会 `matched 2 times` 被跳过，导致
+        #   trace_android_vh_mm_vip_alloc_harder_stat 永远注入不进去。
+        #   注释限定后唯一命中首次尝试点，也正是 alloc_start 所在作用域。
+        """\t * The adjusted alloc_flags might result in immediate success, so try
+\t * that first
+\t */
+\tpage = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 \tif (page)
 \t\tgoto got_pg;""",
-        """\tpage = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
+        """\t * The adjusted alloc_flags might result in immediate success, so try
+\t * that first
+\t */
+\tpage = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 \tif (page)
 \t\tgoto got_pg;
 
@@ -380,15 +396,21 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 
     patch_file(
         "mm/util.c",
+        # ⚠ 上游 6.1 的 kvmalloc_node 里**没有** trace_android_vh_adjust_kvmalloc_flags
+        #   （那是 21 Pro kit 自己加的），原锚点因此永远匹配不到，
+        #   trace_android_vh_mm_vip_kvmalloc 一直注入不进去（实测 0 次）。
+        #   改用上游真实存在且唯一的上下文：no故障语义块结束 + 随后的 kmalloc_node。
         """\t\t/* nofail semantic is implemented by the vmalloc fallback */
 \t\tkmalloc_flags &= ~__GFP_NOFAIL;
 \t}
-\ttrace_android_vh_adjust_kvmalloc_flags(get_order(size), &kmalloc_flags);""",
+
+\tret = kmalloc_node(size, kmalloc_flags, node);""",
         """\t\t/* nofail semantic is implemented by the vmalloc fallback */
 \t\tkmalloc_flags &= ~__GFP_NOFAIL;
 \t\ttrace_android_vh_mm_vip_kvmalloc(&kmalloc_flags);
 \t}
-\ttrace_android_vh_adjust_kvmalloc_flags(get_order(size), &kmalloc_flags);""",
+
+\tret = kmalloc_node(size, kmalloc_flags, node);""",
         marker='trace_android_vh_mm_vip_kvmalloc(&kmalloc_flags);'
     )
 
