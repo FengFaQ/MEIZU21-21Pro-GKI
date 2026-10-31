@@ -458,23 +458,45 @@ def apply_vmscan(p):
 
     # (a) kCFI 保活：让 shrink_slab 被"取地址"，从而生成 KCFI 类型哈希前导码。
     #     魅族 mz_kshrink_slabd 通过 kallsyms 找到 shrink_slab 再间接调用。
+    #
+    # ⚠ run#6 实测教训：
+    #   原实现用 src.index("\n}\n", i) 找函数体结束，但 shrink_slab 内部有
+    #   if 块收尾也是 "\n}\n"，于是最先匹配到的是【函数内部】的块结束，
+    #   声明被插进函数体中间（`return freed;` 之后、真正的 `}` 之前），变成
+    #   "语句后接声明" -> 编译失败：
+    #       mm/vmscan.c:1048:30: error: mixing declarations and code is
+    #       incompatible with standards before C99 [-Werror,-Wdeclaration-after-statement]
+    #   修法：用花括号配对找真正的函数体结束。
     if "shrink_slab_kcfi_ref" in src:
         p.note("  跳过(已打过): %s (shrink_slab kCFI 保活引用)" % rel)
     else:
         anchor = "static unsigned long shrink_slab(gfp_t gfp_mask, int nid,"
         if src.count(anchor) == 1:
             i = src.index(anchor)
-            j = src.index("\n}\n", i)          # shrink_slab 函数体结束
-            block = ("\n\n/*\n"
-                     " * %s: 厂商模块 mz_kshrink_slabd 用 kallsyms 取到 shrink_slab 后经函数指针\n"
-                     " * 间接调用。若内核树内无任何取地址操作，Clang 会优化掉函数入口前 -4 字节的\n"
-                     " * kCFI Type Hash(0xc3b4beac)，模块间接调用即 `CFI failure` panic 卡第一屏。\n"
-                     " * 这里保留一个 __used 函数指针，强制编译器生成类型前导码。\n"
-                     " */\n"
-                     "static unsigned long (*const shrink_slab_kcfi_ref)(gfp_t, int,\n"
-                     "\t\tstruct mem_cgroup *, int) __used = shrink_slab;\n" % MARK)
-            src = src[:j] + block + src[j:]
-            p.note("  已打: %s (shrink_slab kCFI 保活引用)" % rel)
+            brace = src.index("{", i)
+            depth = 0
+            j = -1
+            for k in range(brace, len(src)):
+                if src[k] == "{":
+                    depth += 1
+                elif src[k] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        j = k          # 真正的函数体结束 '}'
+                        break
+            if j < 0:
+                p.fail("%s 里 shrink_slab 花括号不配对" % rel)
+            else:
+                block = ("\n\n/*\n"
+                         " * %s: 厂商模块 mz_kshrink_slabd 用 kallsyms 取到 shrink_slab 后经函数指针\n"
+                         " * 间接调用。若内核树内无任何取地址操作，Clang 会优化掉函数入口前 -4 字节的\n"
+                         " * kCFI Type Hash(0xc3b4beac)，模块间接调用即 `CFI failure` panic 卡第一屏。\n"
+                         " * 这里保留一个 __used 函数指针，强制编译器生成类型前导码。\n"
+                         " */\n"
+                         "static unsigned long (*const shrink_slab_kcfi_ref)(gfp_t, int,\n"
+                         "\t\tstruct mem_cgroup *, int) __used = shrink_slab;\n" % MARK)
+                src = src[:j + 1] + block + src[j + 1:]
+                p.note("  已打: %s (shrink_slab kCFI 保活引用，插在函数体结束之后)" % rel)
         else:
             p.fail("%s 里 shrink_slab 函数定义锚点出现 %d 次" % (rel, src.count(anchor)))
 
