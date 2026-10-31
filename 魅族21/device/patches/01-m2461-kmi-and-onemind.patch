@@ -1,11 +1,11 @@
 diff --git a/drivers/android/vendor_hooks.c b/drivers/android/vendor_hooks.c
-index c7b6b15..77c8eba 100644
+index 954dcb1..d35a589 100644
 --- a/drivers/android/vendor_hooks.c
 +++ b/drivers/android/vendor_hooks.c
-@@ -344,3 +344,25 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_vmscan_kswapd_done);
- EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_compaction_begin);
+@@ -348,3 +348,25 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_compaction_begin);
  EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_compaction_end);
  EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_bus_iommu_probe);
+ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_filemap_get_folio);
 +
 +/* MZ_KIT_P4_VH_EXPORT: OneMind 8 大 Hook 的 KMI 兼容导出 */
 +EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_extfrag_for_order);
@@ -65,13 +65,13 @@ index 5567f48..73ca78b 100644
  	flags = (gen + 1UL) << LRU_GEN_PGOFF;
  	/* see the comment on MIN_NR_GENS about PG_active */
 diff --git a/include/trace/hooks/mm.h b/include/trace/hooks/mm.h
-index 7018cc8..6b82f65 100644
+index 7fa0e65..02cbdf7 100644
 --- a/include/trace/hooks/mm.h
 +++ b/include/trace/hooks/mm.h
-@@ -158,6 +158,31 @@ struct oom_control;
- DECLARE_HOOK(android_vh_mm_alloc_pages_may_oom_exit,
- 	TP_PROTO(struct oom_control *oc, unsigned long did_some_progress),
- 	TP_ARGS(oc, did_some_progress));
+@@ -169,6 +169,31 @@ DECLARE_HOOK(android_vh_mm_alloc_pages_may_oom_exit,
+ DECLARE_HOOK(android_vh_adjust_kvmalloc_flags,
+ 	TP_PROTO(unsigned int order, gfp_t *alloc_flags),
+ 	TP_ARGS(order, alloc_flags));
 +
 +/* MZ_KIT_P4: OneMind 8 大 Hook(MM 部分) —— 签名必须与原厂逐字符一致,
 + * 因为 TP_PROTO 的形参类型参与 __traceiter_* 的 kCFI Type Hash 计算。
@@ -244,17 +244,10 @@ index 844e813..5228ca1 100644
 +
 +/* MZ_KIT_P4_READAHEAD */
 diff --git a/mm/util.c b/mm/util.c
-index 4afa7dd..3c78425 100644
+index 29c9470..40c281b 100644
 --- a/mm/util.c
 +++ b/mm/util.c
-@@ -1,5 +1,6 @@
- // SPDX-License-Identifier: GPL-2.0-only
- #include <linux/mm.h>
-+#include <trace/hooks/mm.h>
- #include <linux/slab.h>
- #include <linux/string.h>
- #include <linux/compiler.h>
-@@ -566,6 +567,9 @@ void *kvmalloc_node(size_t size, gfp_t flags, int node)
+@@ -566,6 +566,9 @@ void *kvmalloc_node(size_t size, gfp_t flags, int node)
  	gfp_t kmalloc_flags = flags;
  	void *ret;
  
@@ -264,7 +257,7 @@ index 4afa7dd..3c78425 100644
  	/*
  	 * We want to attempt a large physically contiguous block first because
  	 * it is less likely to fragment multiple larger blocks and therefore
-@@ -1196,3 +1200,5 @@ void flush_dcache_folio(struct folio *folio)
+@@ -1197,3 +1200,5 @@ void flush_dcache_folio(struct folio *folio)
  }
  EXPORT_SYMBOL(flush_dcache_folio);
  #endif

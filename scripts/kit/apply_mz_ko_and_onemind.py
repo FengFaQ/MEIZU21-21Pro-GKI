@@ -13,11 +13,31 @@ from pathlib import Path
 ROOT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/home/ovo/m2481-kernel/common")
 
 
-def patch_file(rel_path: str, old: str, new: str):
+def patch_file(rel_path: str, old: str, new: str, marker: str = None):
+    """把 old 片段替换成 new；已打过则跳过。
+
+    ⚠ 幂等判据（run#20 教训，必须用 marker）
+    ------------------------------------------------------------
+    原来用 `if new in text` 判断"是否已打过"。但这要求 patch 与脚本的
+    文本**逐字节一致**，一旦有人改了注释 / 换行 / 缩进 / 形参折行方式，
+    判据就失配 —— 而 `old` 片段此时往往仍然存在（因为它通常是被替换内容
+    的前缀或相邻上下文），于是**重复插入** -> 编译期 `redefinition`。
+
+    实测事故（魅族21 走 patch 流程时）：
+        mm/vmscan.c:1057: error: redefinition of 'shrink_slab_kcfi_ref'
+        脚本 2b:  (gfp_t, int, struct mem_cgroup *, int)  ← 单行形参
+        patch  :  (gfp_t, int,\n\t\tstruct mem_cgroup *, int)  ← 分行形参
+      -> new 整段失配 -> 二次插入。
+
+    因此改为：幂等判据优先用 `marker`（一处改动里**最具特异性**的单一
+    标识符，如新函数名 / 新符号名），与注释、换行、缩进完全解耦。
+    未显式给 marker 时退回 new（行为与旧版一致，仅供无歧义场景使用）。
+    """
     p = ROOT / rel_path
     text = p.read_text(encoding="utf-8")
-    if new in text:
-        print(f"[SKIP] {rel_path} (already patched)")
+    probe = marker if marker is not None else new
+    if probe in text:
+        print(f"[SKIP] {rel_path} (already patched: {probe if marker else 'new block'})")
         return
     if old not in text:
         raise RuntimeError(f"[ERROR] Target snippet not found in {rel_path}")
@@ -55,6 +75,7 @@ def main():
         """bad_version:
 \treturn 1;
 }""",
+        marker='bad_version:\n\treturn 1;'
     )
 
     # 3. 补齐魅族专有 .ko 依赖的额外内核导出符号
@@ -62,6 +83,7 @@ def main():
         "drivers/base/power/wakeup.c",
         "postcore_initcall(wakeup_sources_debugfs_init);",
         "postcore_initcall(wakeup_sources_debugfs_init);\n\nEXPORT_SYMBOL_GPL(pm_system_irq_wakeup);",
+        marker='EXPORT_SYMBOL_GPL(pm_system_irq_wakeup);'
     )
 
     patch_file(
@@ -80,6 +102,7 @@ int scsi_execute_cmd_len(struct scsi_device *sdev, const unsigned char *cmd,
 \treturn scsi_execute_cmd(sdev, cmd, opf, buffer, bufflen, timeout, retries, args);
 }
 EXPORT_SYMBOL(scsi_execute_cmd_len);""",
+        marker='scsi_execute_cmd_len('
     )
 
     patch_file(
@@ -97,6 +120,7 @@ void mem_cgroup_id_put2(struct mem_cgroup *memcg)
 \tmem_cgroup_id_put_many(memcg, 1);
 }
 EXPORT_SYMBOL_GPL(mem_cgroup_id_put2);""",
+        marker='mem_cgroup_id_put2('
     )
 
     # 4. mm/vmscan.c: shrink_slab kCFI 前导码保活引用 + 内存回收符号导出
@@ -111,6 +135,7 @@ static unsigned long (*const shrink_slab_kcfi_ref)(gfp_t, int, struct mem_cgroup
 \t__used = shrink_slab;
 
 static void drop_slab_node(int nid)""",
+        marker='shrink_slab_kcfi_ref'
     )
 
     patch_file(
@@ -121,6 +146,7 @@ static void drop_slab_node(int nid)""",
         """unsigned long shrink_inactive_list(unsigned long nr_to_scan,
 \t\tstruct lruvec *lruvec, struct scan_control *sc,
 \t\tenum lru_list lru)""",
+        marker='unsigned long shrink_inactive_list(unsigned long nr_to_scan,'
     )
 
     patch_file(
@@ -133,6 +159,7 @@ static void drop_slab_node(int nid)""",
 \t\t\t       struct lruvec *lruvec,
 \t\t\t       struct scan_control *sc,
 \t\t\t       enum lru_list lru)""",
+        marker='void shrink_active_list(unsigned long nr_to_scan,'
     )
 
     patch_file(
@@ -141,6 +168,7 @@ static void drop_slab_node(int nid)""",
 \t\t\t\t struct lruvec *lruvec, struct scan_control *sc)""",
         """unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
 \t\t\t\t struct lruvec *lruvec, struct scan_control *sc)""",
+        marker='unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,'
     )
 
     patch_file(
@@ -153,6 +181,7 @@ EXPORT_SYMBOL_GPL(shrink_active_list);
 EXPORT_SYMBOL_GPL(shrink_list);
 EXPORT_SYMBOL_GPL(reclaim_pages);
 EXPORT_TRACEPOINT_SYMBOL_GPL(mm_vmscan_kswapd_wake);""",
+        marker='EXPORT_TRACEPOINT_SYMBOL_GPL(mm_vmscan_kswapd_wake);'
     )
 
     # 5. 声明与导出魅族 OneMind 8 大专属 MM Vendor Hooks
@@ -185,6 +214,7 @@ DECLARE_HOOK(android_vh_ra_tuning_max_page,
 \tTP_PROTO(struct readahead_control *ractl, unsigned long *max_pages),
 \tTP_ARGS(ractl, max_pages));
 #endif /* _TRACE_HOOK_MM_H */""",
+        marker='DECLARE_HOOK(android_vh_extfrag_for_order,'
     )
 
     patch_file(
@@ -208,6 +238,7 @@ DECLARE_HOOK(android_vh_memcg_protect_lru_gen_add_folio,
 \t\tunsigned long *seq),
 \tTP_ARGS(type, lrugen, lruvec, seq));
 #endif /* _TRACE_HOOK_VMSCAN_H */""",
+        marker='DECLARE_HOOK(android_vh_memcg_filepages_protect,'
     )
 
     patch_file(
@@ -237,6 +268,7 @@ MZ_DEFINE_VH(android_vh_smartzram_tune_swappiness)
 
 int wait_spam_info;
 EXPORT_SYMBOL_GPL(wait_spam_info);""",
+        marker='MZ_DEFINE_VH(android_vh_smartzram_tune_swappiness)'
     )
 
     # 6. 接通 8 大 OneMind 内存与预读调用点
@@ -251,6 +283,7 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 #include <trace/hooks/mm.h>
 
 #include "internal.h\"""",
+        marker='#include <trace/hooks/mm.h>'
     )
 
     patch_file(
@@ -270,6 +303,7 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 \ttrace_android_vh_extfrag_for_order(&info, zone, order);
 \tif (info.free_pages == 0)
 \t\treturn 0;""",
+        marker='trace_android_vh_extfrag_for_order(&info, zone, order);'
     )
 
     patch_file(
@@ -289,6 +323,7 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 \t}
 
 \talloc_flags = gfp_to_alloc_flags_cma(gfp_mask, alloc_flags);""",
+        marker='trace_android_vh_mm_vip_alloc_harder(gfp_mask, &alloc_flags, &vip_promote);'
     )
 
     patch_file(
@@ -301,6 +336,7 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 \t\tgoto got_pg;
 
 \ttrace_android_vh_mm_vip_alloc_harder_stat(alloc_flags, alloc_start, order);""",
+        marker='trace_android_vh_mm_vip_alloc_harder_stat(alloc_flags, alloc_start, order);'
     )
 
     patch_file(
@@ -318,6 +354,7 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 \tstruct zone *zone;
 \tunsigned long flags;
 \tunsigned int low_high_wm_ratio = 1;""",
+        marker='unsigned int low_high_wm_ratio = 1;'
     )
 
     patch_file(
@@ -338,6 +375,7 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 \t\t\tzone->_watermark[WMARK_HIGH] = low_wmark_pages(zone) + tmp;
 \t\t}
 \t\tzone->_watermark[WMARK_PROMO] = high_wmark_pages(zone) + tmp;""",
+        marker='trace_android_vh_tune_watermark_ratio(&low_high_wm_ratio);'
     )
 
     patch_file(
@@ -351,6 +389,7 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 \t\ttrace_android_vh_mm_vip_kvmalloc(&kmalloc_flags);
 \t}
 \ttrace_android_vh_adjust_kvmalloc_flags(get_order(size), &kmalloc_flags);""",
+        marker='trace_android_vh_mm_vip_kvmalloc(&kmalloc_flags);'
     )
 
     patch_file(
@@ -368,6 +407,7 @@ EXPORT_SYMBOL_GPL(wait_spam_info);""",
 \t/*
 \t * start of file
 \t */""",
+        marker='trace_android_vh_ra_tuning_max_page(ractl, &max_pages);'
     )
 
     patch_file(
@@ -385,6 +425,7 @@ void memcg_protect_lru_gen_add_folio(int type, struct lru_gen_folio *lrugen,
 \t\t\t\t     struct lruvec *lruvec, unsigned long *seq);
 
 static inline bool lru_gen_add_folio(struct lruvec *lruvec, struct folio *folio, bool reclaiming)""",
+        marker='void memcg_protect_lru_gen_add_folio(int type, struct lru_gen_folio *lrugen,'
     )
 
     patch_file(
@@ -398,6 +439,7 @@ static inline bool lru_gen_add_folio(struct lruvec *lruvec, struct folio *folio,
 
 \tmemcg_protect_lru_gen_add_folio(type, lrugen, lruvec, &seq);
 \tgen = lru_gen_from_seq(seq);""",
+        marker='memcg_protect_lru_gen_add_folio(type, lrugen, lruvec, &seq);'
     )
 
     patch_file(
@@ -417,6 +459,10 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 {
 \tbool success;
 \tbool bypass = false;""",
+        # ⚠ 不能用 'bool bypass = false;' —— 上游 vmscan.c 已有 2 处同名局部变量，
+        #   会误判成「已打过」而跳过 sort_folio 的改动。
+        #   改用本块特有的函数定义 + trace 调用组合。
+        marker='memcg_protect_lru_gen_add_folio(int type, struct lru_gen_folio *lrugen,\n\t\t\t\t     struct lruvec *lruvec, unsigned long *seq)\n{\n\ttrace_android_vh_memcg_protect_lru_gen_add_folio'
     )
 
     patch_file(
