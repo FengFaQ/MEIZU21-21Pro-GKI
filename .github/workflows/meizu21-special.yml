@@ -1,0 +1,684 @@
+name: 魅族 21 特殊产物构建
+# 一仓库双管理器：workflow 名保持稳定（不带变体），实际变体由 run-name 体现，
+# 否则 BakaSU 的 run 在 Actions 列表里也会显示成 FinaSU，容易误判。
+run-name: 魅族 21 特殊产物 · ${{ inputs.ksu_variant || 'BakaSU' }} · android14-6.1.25
+
+# ============================================================================
+# 目标机型: 魅族 21 (M2461 / SM8650 Pineapple)
+# 基线: GKI android14-6.1 / sub_level 25 / os_patch 2023-10 (与 21 Pro 相同)
+# ============================================================================
+#
+# 与「MEIZU 21pro」工作流的差异只有 4 处:
+#   1. device_dir   : 魅族21/device      (21 的设备事实 / KMI 基准 / AVB 模板)
+#   2. release 标签 : meizu21-finatsu-N  (21 Pro 是 meizu21pro-finatsu-N)
+#   3. latest 标签  : meizu21-latest
+#   4. dist 分支    : dist-meizu21       (不能覆盖 21 Pro 的 dist)
+#
+# ## 一仓库双管理器（FinaSU / BakaSU）
+# ksu_variant 支持两条**完全独立**的编译线，除管理器本体（源码树 / APK /
+# 证书槽位）外其余选项完全一致（LTO=none / trim_unused_ksyms=n /
+# strict_kcfi=false / 同一套门禁、AVB 重打包、AnyKernel3+boot 产物）：
+#   | | FinaSU | BakaSU |
+#   |---|---|---|
+#   | 源码 | LyraVoid/FinaSU | Baka-SU/BakaSU |
+#   | 证书槽 | 第二槽 EXPECTED_SIZE2/HASH2 | 第一槽 EXPECTED_SIZE/HASH + MULTI_MANAGER |
+#   | 钉版本 | finasu_ref (v1.3.2) | bakasu_ref (v4.2.0-rc3) |
+#   | release | meizu21-finatsu-N / meizu21-latest | meizu21-bakasu-N / meizu21-bakasu-latest |
+#   | dist | dist-meizu21 | dist-meizu21-bakasu |
+# 两线的 release / latest / dist 互不覆盖；发布集里 APK 与 MANIFEST 文件名带
+# -bakasu 后缀，避免与 FinaSU 的发布集混淆。
+#
+# 其余（管理器 APK 绑定、三道门禁、AVB0+AVBf 注入、kit 补丁）完全复用
+# .github/workflows/build.yml，两机型共享同一条流水线。
+#
+# ## 管理器 APK 绑定
+# 所有网络操作在 CI 内完成: job1 拉 FinaSU 官方 APK 并提取证书 ->
+# job2 用该证书编进内核第二信任槽 -> job3 把内核产物与这份 APK 一起上传。
+# 用户必须安装 release 附带的那份 APK，否则管理器认不到内核。
+#
+# ## 触发
+# 只有 workflow_dispatch（手动）。workflow_dispatch.inputs 上限 10 个，
+# 当前 6 个。
+# ============================================================================
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_variant:
+        description: 'KernelSU 变体（FinaSU / BakaSU 两条独立编译线）'
+        required: true
+        type: choice
+        options:
+          - FinaSU
+          - BakaSU
+        default: FinaSU
+      ksu_mode:
+        description: 'KSU 模式'
+        required: true
+        type: choice
+        options:
+          - 关闭
+          - 禁用SUSFS
+          - 禁用KSU
+        default: 关闭
+      finasu_ref:
+        description: 'FinaSU 版本（默认钉住；留空 = 跟随上游 latest，构建不可复现）'
+        required: false
+        type: string
+        # ★ 钉住版本，保证构建可复现（finasu-porter 审计）：
+        #   上游发布很频繁（实测 5 天 8 个稳定版，v1.0.9 -> v1.3.2），
+        #   留空跟 latest 会让每次重跑拿到不同 APK/证书，
+        #   而内核把这个 APK 的证书哈希编进了第二信任槽
+        #   （KSU_EXPECTED_SIZE2 / KSU_EXPECTED_HASH2）—— 版本一变哈希就变。
+        #   升级流程：改这一行的默认值 + 同步更新 release notes 里的版本号。
+        default: 'v1.3.2'
+      bakasu_ref:
+        description: 'BakaSU 版本（默认钉住；仅 ksu_variant=BakaSU 时生效）'
+        required: false
+        type: string
+        # ★ 同 finasu_ref 的可复现理由：BakaSU 上游**只有 prerelease**
+        #   （v4.2.0-rc3 / rc2 / rc1 全是 prerelease），/releases/latest 取不到，
+        #   所以必须钉 tag。内核把该 tag 对应 APK 的证书编进信任槽，版本一变哈希就变。
+        #   实测（2026-10-31）v4.2.0-rc3 -> ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk
+        #   证书 = 0x0377 d3469712...1df64（与上游 main manager_sign.h 的
+        #   EXPECTED_HASH_BAKASU 完全一致，说明该管理器的签名证书跨版本稳定）。
+        #   升级流程：改这一行默认值；release notes 会带出实际使用的 tag。
+        default: 'v4.2.0-rc3'
+      lto_mode:
+        description: 'LTO 模式（none = 与原厂一致；thin 会增加 KMI 风险）'
+        required: true
+        type: choice
+        options:
+          - none
+          - thin
+        default: none
+      boot_sign:
+        description: 'Boot 镜像（不签名 = 克隆原厂 AVB0+AVBf，推荐）'
+        required: false
+        type: choice
+        options:
+          - 不签名
+          - 签名
+        default: 不签名
+      enable_susfs:
+        description: '启用 SUSFS'
+        required: true
+        type: boolean
+        default: true
+
+# 同一分支串行，避免两次构建同时写 release / force-push dist 互相覆盖
+concurrency:
+  # ⚠ group 必须带 ksu_variant：
+  #   FinaSU / BakaSU 是两条独立的编译线，若共用同一 group 会互相排队
+  #   （cancel-in-progress=false 时不取消、只串行），验证时一条线要等另一条
+  #   跑完 30-40 分钟才能开始，效率极低且容易误以为「被对方取消了」。
+  #   带上 variant 后：同一条线内部仍严格串行（行为不变），
+  #   两条线之间互不阻塞。
+  group: meizu21-special-${{ github.ref }}-${{ inputs.ksu_variant || 'BakaSU' }}
+  cancel-in-progress: false
+
+env:
+  FINASU_REPO: LyraVoid/FinaSU
+  # 一仓库双管理器：BakaSU 线专用仓库（job1 拉 APK、build 解析 tag->commit 都用它）
+  BAKASU_REPO: Baka-SU/BakaSU
+
+jobs:
+  # ==========================================================================
+  # job1: 拉官方 APK + 提取证书（CI 网络好，几秒钟）
+  # ==========================================================================
+  fetch-manager:
+    name: 取管理器 APK + 证书 (${{ inputs.ksu_variant || 'FinaSU' }})
+    runs-on: ubuntu-latest
+    outputs:
+      cert_size: ${{ steps.cert.outputs.size }}
+      cert_hash: ${{ steps.cert.outputs.hash }}
+      apk_name: ${{ steps.cert.outputs.apk_name }}
+      apk_sha256: ${{ steps.cert.outputs.apk_sha256 }}
+      finasu_ref: ${{ steps.fetch.outputs.tag }}
+      # BakaSU 线：tag 指向的提交（与 APK 的 versionCode 同源，传给 build.yml
+      # 对齐内核侧 KSU 版本）+ 实际使用的 release tag
+      # ⚠ 该值由 id: bakasu 步骤（拉取 BakaSU 指定版本 APK 时解析 tag->commit）写出，
+      #   不是 steps.cert。此前误写成 steps.cert 导致恒为空，BakaSU 内核停留在
+      #   clone 到的 main HEAD，KSU_VERSION 与 APK versionCode 错位
+      #   （实测 35253 vs 35171，管理器会提示"需要更新内核"）。
+      ksu_commit: ${{ steps.bakasu.outputs.ksu_commit }}
+      bakasu_tag: ${{ steps.bakasu.outputs.tag }}
+      # 两条线共用的中间输出（来自 cert 步骤）
+      cert_src: ${{ steps.cert.outputs.cert_src }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout（拿证书提取脚本）
+        uses: actions/checkout@v7
+
+      # ★ FinaSU 线：整个步骤体保持原样，只用 if 分流（BakaSU 走下面的步骤）
+      - name: 拉取 FinaSU 官方 APK
+        id: fetch
+        if: (inputs.ksu_variant || 'FinaSU') == 'FinaSU'
+        env:
+          REQ_REF: ${{ inputs.finasu_ref }}
+        run: |
+          set -euo pipefail
+          TAG="${REQ_REF:-}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh api "repos/$FINASU_REPO/releases/latest" --jq .tag_name)
+            echo "未指定版本 -> 取上游 latest: $TAG"
+          else
+            echo "使用指定版本: $TAG"
+          fi
+          test -n "$TAG" || { echo "::error title=取不到 FinaSU 版本::上游 releases/latest 返回空"; exit 1; }
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          # ★ 拒绝 prerelease / draft（finasu-porter 审计）
+          #   `/releases/latest` 本身只返回稳定版，但**手动填 finasu_ref 可绕过**
+          #   这层保护 —— 上游有 17 个 pre tag（含 v1.2.1-vivo-beta1 这类
+          #   机型特定版），用错会得到完全不匹配的证书。
+          REL_JSON=$(gh api "repos/$FINASU_REPO/releases/tags/$TAG" 2>/dev/null || true)
+          if [ -n "$REL_JSON" ]; then
+            IS_PRE=$(printf '%s' "$REL_JSON" | python3 -c "import sys,json;d=json.load(sys.stdin);print('1' if d.get('prerelease') else '0')" 2>/dev/null || echo 0)
+            IS_DRAFT=$(printf '%s' "$REL_JSON" | python3 -c "import sys,json;d=json.load(sys.stdin);print('1' if d.get('draft') else '0')" 2>/dev/null || echo 0)
+            if [ "$IS_PRE" = "1" ] || [ "$IS_DRAFT" = "1" ]; then
+              echo "::error title=拒绝预发布版本::$TAG 是 prerelease=$IS_PRE draft=$IS_DRAFT，请改用稳定版"
+              exit 1
+            fi
+            echo "版本校验: $TAG 是稳定版 (prerelease=false draft=false)"
+          else
+            echo "::warning title=无法查询 release 元数据::将直接尝试下载 $TAG"
+          fi
+
+          mkdir -p manager-apk
+          gh release download "$TAG" --repo "$FINASU_REPO" \
+            --pattern '*.apk' --dir ./manager-apk --clobber
+          ls -l ./manager-apk
+          echo "APK 数量: $(ls -1 ./manager-apk/*.apk 2>/dev/null | wc -l)"
+
+      # ★ BakaSU 线：解析钉住的 release tag -> 下载**发布签名** APK -> 记录 tag 指向的提交
+      #   与 FinaSU 的差异（全部对着上游原文核实，勿凭印象改）：
+      #     · Baka-SU/BakaSU 只有 prerelease（v4.2.0-rc3/rc2/rc1 全 prerelease），
+      #       /releases/latest 取不到 -> 必须钉 tag，不能跟随 latest。
+      #     · 每个 release 有 4 个 ABI 包（arm64-v8a / armeabi-v7a / universal / x86_64），
+      #       资产名形如 ReSukiSU_v4.2.0-rc3_<versionCode>-<abi>-release.apk；
+      #       R8 混淆可能让 universal 包的签名证书与发布包不同，
+      #       所以**只取 arm64-v8a-release.apk**，拿不到就报错，不猜。
+      #     · 内核侧版本号 = 30000 + git rev-list --count HEAD + 700（上游 Kbuild），
+      #       APK 文件名里的 <versionCode> 就是该值；因此必须把 tag 指向的提交
+      #       传给 build.yml 检出，否则管理器提示"需要更新内核"。
+      - name: 拉取 BakaSU 指定版本 APK
+        id: bakasu
+        if: inputs.ksu_variant == 'BakaSU'
+        env:
+          REQ_REF: ${{ inputs.bakasu_ref }}
+        run: |
+          set -euo pipefail
+          TAG="${REQ_REF:-}"
+          test -n "$TAG" || { echo "::error title=取不到 BakaSU 版本::bakasu_ref 为空（上游只有 prerelease，不能跟随 latest）"; exit 1; }
+          echo "使用指定版本: $TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          REL_JSON=$(gh api "repos/$BAKASU_REPO/releases/tags/$TAG" 2>/dev/null || true)
+          test -n "$REL_JSON" || { echo "::error title=BakaSU 版本不存在::repos/$BAKASU_REPO/releases/tags/$TAG 查询失败"; exit 1; }
+          IS_DRAFT=$(printf '%s' "$REL_JSON" | python3 -c "import sys,json;print('1' if json.load(sys.stdin).get('draft') else '0')")
+          IS_PRE=$(printf '%s' "$REL_JSON" | python3 -c "import sys,json;print('1' if json.load(sys.stdin).get('prerelease') else '0')")
+          [ "$IS_DRAFT" = "0" ] || { echo "::error title=拒绝草稿版本::$TAG 是 draft"; exit 1; }
+          # 上游长期只有 prerelease，所以这里【允许】prerelease（与 FinaSU 线相反），
+          # 但必须留痕，让发布说明能看出这是预发布版本
+          echo "版本校验: $TAG 是发布版本 (draft=false prerelease=$IS_PRE)"
+
+          APK_ASSET=$(printf '%s' "$REL_JSON" | python3 -c "
+          import json, sys, re
+          d = json.load(sys.stdin)
+          names = [a['name'] for a in d.get('assets', []) if a['name'].lower().endswith('.apk')]
+          # 只要 arm64-v8a 的 release 包：debug / 其它 ABI 包的签名证书可能与发布包不同
+          pick = [n for n in names if n.endswith('-arm64-v8a-release.apk')]
+          print(pick[0] if len(pick) == 1 else '')
+          ")
+          if [ -z "$APK_ASSET" ]; then
+            echo "::error title=找不到 arm64-v8a 发布 APK::$TAG 的资产里没有唯一的 *-arm64-v8a-release.apk"
+            printf '%s' "$REL_JSON" | python3 -c "import sys,json;[print('  asset:',a['name']) for a in json.load(sys.stdin).get('assets',[])]"
+            exit 1
+          fi
+          echo "APK 资产: $APK_ASSET"
+          echo "asset=$APK_ASSET" >> $GITHUB_OUTPUT
+
+          mkdir -p manager-apk
+          gh release download "$TAG" --repo "$BAKASU_REPO" \
+            --pattern "$APK_ASSET" --dir ./manager-apk --clobber
+          ls -l ./manager-apk
+
+          # tag -> 提交（annotated tag 需二次解引用），传给 build.yml 检出对齐版本号
+          REF_JSON=$(gh api "repos/$BAKASU_REPO/git/ref/tags/$TAG")
+          OBJ_SHA=$(printf '%s' "$REF_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['object']['sha'])")
+          OBJ_TYPE=$(printf '%s' "$REF_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['object']['type'])")
+          if [ "$OBJ_TYPE" = "tag" ]; then
+            OBJ_SHA=$(gh api "repos/$BAKASU_REPO/git/tags/$OBJ_SHA" --jq .object.sha)
+          fi
+          echo "$OBJ_SHA" | grep -qE '^[0-9a-f]{40}$' || { echo "::error title=tag 解析失败::$TAG -> [$OBJ_SHA]"; exit 1; }
+          echo "tag $TAG -> commit $OBJ_SHA"
+          echo "ksu_commit=$OBJ_SHA" >> $GITHUB_OUTPUT
+
+      - name: 提取管理器签名证书（官方零依赖提取器）
+        id: cert
+        run: |
+          set -euo pipefail
+          APK=$(ls ./manager-apk/*.apk | head -1)
+          test -n "$APK" || { echo "::error title=没有下载到 APK::"; exit 1; }
+          echo "APK: $APK"
+
+          # 官方脚本解析 APK Signing Block，输出 "<cert_size> <cert_sha256>"
+          # 不依赖 apksigner / keytool
+          OUT=$(python3 scripts/finasu_compat/extract_manager_cert.py "$APK" | head -n1)
+          echo "提取结果: $OUT"
+          SIZE="${OUT%% *}"
+          HASH="${OUT##* }"
+          test -n "$SIZE" && test -n "$HASH" || {
+            echo "::error title=证书提取失败::extract_manager_cert.py 输出为空"; exit 1; }
+          # 基本合法性：size 应是 0x 开头的十六进制，hash 应是 64 位十六进制
+          case "$SIZE" in 0x*|0X*) ;; *) echo "::error title=证书尺寸格式异常::$SIZE"; exit 1;; esac
+          echo "$HASH" | grep -qE '^[0-9a-fA-F]{64}$' || { echo "::error title=证书哈希格式异常::$HASH"; exit 1; }
+
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "apk_name=$(basename "$APK")" >> $GITHUB_OUTPUT
+          echo "apk_sha256=$(sha256sum "$APK" | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+          # ★ 内核 commit 与 APK versionCode 一致性校验（finasu-porter 审计）
+          #   上游公式：APK versionCode = tag 的 rev-list --count + 30000
+          #   实测 v1.3.2 -> 3090 + 30000 = 33090 == FinaSU_v1.3.2_33090-release.apk
+          #   错位是【静默的】：证书仍匹配、管理器能认出内核，
+          #   但会报"需要更新内核"（UAPI 版本不一致）。这里留痕告警，不阻塞
+          #   （公式属上游实现细节，变了不该挡住构建）。
+          TAG_NAME="${TAG:-}"
+          if [ -n "$TAG_NAME" ]; then
+            APK_VC=$(basename "$APK" | grep -oE '_[0-9]{4,}_' | tr -d '_' || true)
+            if [ -n "${APK_VC:-}" ]; then
+              echo "APK versionCode = $APK_VC"
+              EXPECT_CNT=$((APK_VC - 30000))
+              echo "  按上游公式反推，$TAG_NAME 的 commit 数应约为 $EXPECT_CNT"
+              # 真去查一次 tag 的 commit 数（上游公式：versionCode = rev-list --count + 30000）
+              REAL_CNT=$(gh api "repos/$FINASU_REPO/git/ref/tags/$TAG_NAME" \
+                           --jq '.object.sha' 2>/dev/null | \
+                         xargs -r -I{} gh api "repos/$FINASU_REPO/git/tags/{}" \
+                           --jq '.object.sha' 2>/dev/null || true)
+              if [ -n "${REAL_CNT:-}" ]; then
+                echo "  tag 指向 commit: $REAL_CNT"
+              fi
+              echo "  （若管理器提示\"需要更新内核\"，说明内核侧 commit 与 APK UAPI 版本错位）"
+            fi
+          fi
+
+          {
+            echo "### 管理器 APK"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 文件 | $(basename "$APK") |"
+            echo "| 证书 size | $SIZE |"
+            echo "| 证书 sha256 | \`$HASH\` |"
+            echo "| APK sha256 | \`$(sha256sum "$APK" | cut -d' ' -f1)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # ★ BakaSU 线的证书一致性断言（FinaSU 线不执行）:
+          #   上游 main 的 manager/manager_sign.h 把官方管理器证书写死为
+          #   EXPECTED_SIZE_BAKASU 0x377 / EXPECTED_HASH_BAKASU d3469712...1df64；
+          #   这里核对下载到的 APK 与此一致，证明「发布 APK 的签名证书 == 内核内置
+          #   的 BakaSU 官方槽」，否则 BakaSU 管理器会显示"未安装/不受信任"。
+          #   上游换签名（重新生成密钥）时变体名会失配 -> 立即失败，不静默产出坏内核。
+          VAR="${{ inputs.ksu_variant }}"
+          if [ "$VAR" = "BakaSU" ]; then
+            EXPECTED_SIZE="0x0377"
+            EXPECTED_HASH="d3469712b6214462764a1d8d3e5cbe1d6819a0b629791b9f4101867821f1df64"
+            if [ "$SIZE" != "$EXPECTED_SIZE" ] || [ "$HASH" != "$EXPECTED_HASH" ]; then
+              echo "::error title=BakaSU 管理器证书与上游声明不符::期望 $EXPECTED_SIZE $EXPECTED_HASH，实际 $SIZE $HASH（上游可能已换签名，需同步更新本仓库）"
+              exit 1
+            fi
+            echo "BakaSU 证书核对通过: $SIZE $HASH（与上游 manager_sign.h 的 EXPECTED_SIZE_BAKASU / EXPECTED_HASH_BAKASU 一致）"
+            echo "cert_src=bakasu-release" >> $GITHUB_OUTPUT
+          else
+            echo "cert_src=finasu-release" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 上传 APK（供 release 一起发布）
+        uses: actions/upload-artifact@v4
+        with:
+          # ★ artifact 名带 variant：两条线绝不共用同一个 manager-apk
+          name: manager-apk-${{ inputs.ksu_variant || 'FinaSU' }}
+          path: manager-apk/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  # ==========================================================================
+  # job2: 编内核（用 job1 算出的证书哈希编进第二信任槽）
+  # ==========================================================================
+  build-kernel:
+    name: 编译内核
+    needs: fetch-manager
+    uses: ./.github/workflows/build.yml
+    # ★ 必须继承 secrets: build.yml 里「提交失败日志到 log/」「推 dist 分支」
+    #   等步骤要用 GITHUB_TOKEN。少了这行，调用 job 在展开阶段就会失败 ——
+    #   表现为 run 里【只有 release 且 skipped】，build-kernel 根本不出现。
+    secrets: inherit
+    with:
+      # ---- 机型固定参数（硬编码，不占 dispatch input 名额）----
+      # ⚠ 必须加引号：`kernel_version: 6.1` 会被 YAML 解析成浮点数 6.1，
+      #   而 build.yml 声明的是 string，不加引号会类型不匹配。
+      android_version: 'android14'
+      kernel_version: '6.1'
+      sub_level: '25'
+      os_patch_level: '2023-10'
+      # 必须与原厂 LOCALVERSION 完全一致：system_dlkm 57 个模块的目录名与
+      # vermagic 就是这一串，不一致 -> 模块加载不了 -> 卡第一屏
+      version: '6.1.25-android14-11-maybe-dirty'
+
+      # ---- 管理器证书（来自 job1，注入内核信任槽）----
+      # FinaSU = 第二信任槽 EXPECTED_SIZE2/HASH2；BakaSU = 第一槽 Custom
+      # (EXPECTED_SIZE/HASH) + CONFIG_KSU_MULTI_MANAGER_SUPPORT。同一个变量，
+      # build.yml 按 ksu_variant 分流，两条线互不影响。
+      ksu_cert_size: ${{ needs.fetch-manager.outputs.cert_size }}
+      ksu_cert_hash: ${{ needs.fetch-manager.outputs.cert_hash }}
+      # BakaSU 线：检出到与发布 APK 同源的提交（tag 指向的 commit），
+      # 否则内核侧 KSU 版本与 APK versionCode 错位 -> 管理器报"需要更新内核"。
+      # FinaSU 线留空 => 跟随克隆到的 master HEAD（与改动前完全一致）。
+      ksu_commit: ${{ inputs.ksu_variant == 'BakaSU' && needs.fetch-manager.outputs.ksu_commit || '' }}
+
+      # ---- 用户可调 ----
+      ksu_variant: ${{ inputs.ksu_variant || 'FinaSU' }}
+      ksu_mode: ${{ inputs.ksu_mode || '关闭' }}
+      lto_mode: ${{ inputs.lto_mode || 'none' }}
+      boot_sign: ${{ inputs.boot_sign || '不签名' }}
+      enable_susfs: ${{ inputs.enable_susfs }}
+
+      # ---- 其余开关全关（21 Pro 单机型，不带多余功能面）----
+      # use_zram / use_bbg / use_net_enhance / use_rekernel / droidspaces_ntsync
+      # 在 build.yml 里是 boolean，传裸 false 是对的。
+      use_zram: true
+      # ★ BBG 基带保护（防格机）：用户要求默认开启。
+      #   上游 vc-teahouse/Baseband-guard，打 CONFIG_BBG=y 并把
+      #   baseband_guard 挂进 LSM 列表，防止基带分区被误写导致变砖。
+      #   build.yml 里该步骤自带「下载失败/安装失败/校验失败」三重兜底，
+      #   失败时打 ::error 阻断构建（skip_incompatible=false 时）。
+      use_bbg: true
+      use_net_enhance: true
+      use_rekernel: false
+      cve_2026_43499_patch: false
+      supp_op: false
+      droidspaces_ntsync: true
+      skip_incompatible: false
+      build_time: ''
+      # ⚠ use_kpm / droidspaces / artifact_upload_mode 是 string，必须加引号：
+      #   `droidspaces: off` 会被 YAML 1.1 解析成布尔 false。
+      use_kpm: 'disabled (关闭)'
+      droidspaces: 'on'
+      artifact_upload_mode: '上传全部'
+      # 设备事实目录固定（单机型）。若以后要支持第二机型（21 / M2461），
+      # 再把它改成 dispatch input 并相应精简其它 input。
+      device_dir: '魅族21/device'
+      # TRIM_UNUSED_KSYMS 默认 n（不裁剪）。
+      # run#23 实测：=y + 白名单会在 kleaf 的
+      #   Checking for kmi_symbol_list_strict_mode ... failed
+      #   Symbols missing from the ksymtab: ___update_load_avg / __bforget / ...
+      # 挂掉，因为 trim 与 strict_mode 语义天然冲突（trim 裁掉"没被引用"的符号，
+      # 而 strict_mode 要求 __ksymtab 完全等于 KMI 清单）。
+      # =n 的代价只是导出符号比原厂多，而模块加载只检查它 NEED 的符号
+      # 是否存在且 CRC 匹配，不关心内核多导出什么（21 线 run 26 已实证）。
+      # 真正的 CRC 保障在编译后门禁 2：二进制层覆写 __kcrctab。
+      trim_unused_ksyms: 'n'
+      # kCFI 门禁默认只告警（kCFI 部分不匹配仍可能能开机，先产出镜像让用户试刷）
+      strict_kcfi: false
+
+  # ==========================================================================
+  # job3: 发布 —— 内核产物 + 这版 GKI 所用的 APK 一起上传
+  # ==========================================================================
+  release:
+    name: 发布
+    needs: [fetch-manager, build-kernel]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # 必须 checkout：要读 魅族21/device 下的设备事实写 release notes
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # 同时下载内核产物与 manager-apk（都在 ./artifacts/ 下，各占一个子目录）
+      - name: 下载全部产物（含管理器 APK）
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: 整理产物清单
+        id: pack
+        env:
+          APK_NAME: ${{ needs.fetch-manager.outputs.apk_name }}
+          APK_SHA: ${{ needs.fetch-manager.outputs.apk_sha256 }}
+          CERT_SIZE: ${{ needs.fetch-manager.outputs.cert_size }}
+          CERT_HASH: ${{ needs.fetch-manager.outputs.cert_hash }}
+          FINASU_TAG: ${{ needs.fetch-manager.outputs.finasu_ref }}
+          BAKASU_TAG: ${{ needs.fetch-manager.outputs.bakasu_tag }}
+          MANAGER_VARIANT: ${{ inputs.ksu_variant || 'FinaSU' }}
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          echo "== 产物目录结构 =="
+          find ./artifacts -type f | sort
+
+          # ---- P1-3: 管理器 APK 必须唯一 ----
+          #   manager-apk artifact 里若出现多个 apk（上游发多架构包 / 打包出错），
+          #   平铺后会把多个 apk 一起发出去，用户装错就管理器认不到内核
+          #   （内核里编的是某一个特定证书的哈希）。
+          # 一仓库双管理器：job1 的 artifact 名带 variant（manager-apk-FinaSU /
+          # manager-apk-BakaSU），这里只认本条线的那一个，绝不跨线取包
+          APK_DIR="./artifacts/manager-apk-${MANAGER_VARIANT}"
+          if [ -d "$APK_DIR" ]; then
+            mapfile -t APK_LIST < <(find "$APK_DIR" -maxdepth 1 -name '*.apk' -type f | sort)
+            echo "$APK_DIR 里的 apk 数量: ${#APK_LIST[@]}"
+            printf '  %s\n' "${APK_LIST[@]}"
+            if [ "${#APK_LIST[@]}" -gt 1 ]; then
+              echo "::error title=管理器 APK 不唯一::$APK_DIR 里有 ${#APK_LIST[@]} 个 apk，无法确定该发哪一个（内核只认其中一个的证书）"
+              exit 1
+            fi
+            if [ "${#APK_LIST[@]}" -eq 0 ]; then
+              echo "::error title=管理器 APK 缺失::$APK_DIR 里没有 apk"
+              exit 1
+            fi
+          else
+            echo "::warning title=缺少 manager-apk artifact::发布集将不含管理器 APK"
+          fi
+
+          # ---- P1-2: 平铺时检测同名冲突（不再静默覆盖）----
+          COPY_N=0
+          CONFLICT=0
+          while IFS= read -r -d '' f; do
+            base=$(basename "$f")
+            if [ -e "publish/$base" ]; then
+              echo "::warning title=产物同名冲突::$base 来自 $(dirname "$f") 覆盖了先前的同名文件（内容可能不同）"
+              CONFLICT=$((CONFLICT + 1))
+            fi
+            cp -v "$f" "publish/$base"
+            COPY_N=$((COPY_N + 1))
+          done < <(find ./artifacts -type f \
+                     \( -name '*.img' -o -name '*.zip' -o -name '*.apk' \
+                        -o -name '*.txt' -o -name '*.log' -o -name '*.report' \) \
+                     -print0)
+          echo "平铺文件数: $COPY_N，同名冲突: $CONFLICT"
+
+          # ★ 硬校验：APK 必须在最终发布集里（用户要求"把编译时用的 APK 一起上传"）
+          if [ -z "${APK_NAME:-}" ] || [ ! -f "publish/${APK_NAME}" ]; then
+            echo "::error title=发布集缺少管理器 APK::期望 publish/${APK_NAME:-<空>}"
+            ls -l publish || true
+            exit 1
+          fi
+          GOT=$(sha256sum "publish/${APK_NAME}" | cut -d' ' -f1)
+          echo "APK sha256 实际: $GOT"
+          echo "APK sha256 期望: ${APK_SHA:-<空>}"
+          if [ -n "${APK_SHA:-}" ] && [ "$GOT" != "$APK_SHA" ]; then
+            echo "::error title=管理器 APK 校验失败::artifact 里的 APK 与 job1 算哈希时不是同一份"
+            exit 1
+          fi
+
+          # ★ 一仓库双管理器：发布集里的文件名带变体标签，用户不可能把
+          #   FinaSU 的 APK 配到 BakaSU 的 boot.img 上。
+          #   FinaSU 线保持原文件名不变（历史 release 与用户脚本依赖它），
+          #   BakaSU 线加 -bakasu 后缀。
+          if [ "$MANAGER_VARIANT" = "BakaSU" ]; then
+            APK_PUB="bakasu-${APK_NAME}"
+            MAN_PUB="MANAGER_INFO-bakasu.txt"
+          else
+            APK_PUB="${APK_NAME}"
+            MAN_PUB="MANAGER_INFO.txt"
+          fi
+          # ⚠ FinaSU 线上 APK_PUB == APK_NAME，直接 mv 会让 mv 报
+          #   "are the same file" 并返回非 0，在 set -e 下中断整个发布步骤。
+          #   只有真的改名（BakaSU 线）时才 mv。
+          if [ "$APK_PUB" != "$APK_NAME" ]; then
+            mv -v "publish/${APK_NAME}" "publish/${APK_PUB}"
+          else
+            echo "APK 名无需改名: ${APK_NAME}"
+          fi
+
+          {
+            echo "manager_variant=${MANAGER_VARIANT}"
+            echo "manager_apk=${APK_PUB}"
+            echo "manager_apk_sha256=${APK_SHA:-未知}"
+            echo "manager_cert_size=${CERT_SIZE:-未知}"
+            echo "manager_cert_hash=${CERT_HASH:-未知}"
+            if [ "$MANAGER_VARIANT" = "BakaSU" ]; then
+              echo "bakasu_tag=${BAKASU_TAG:-unknown}"
+              echo "manager_cert_slot=custom(KSU_EXPECTED_SIZE/HASH) + CONFIG_KSU_MULTI_MANAGER_SUPPORT=y"
+            else
+              echo "finasu_tag=${FINASU_TAG:-unknown}"
+              echo "manager_cert_slot=second(KSU_EXPECTED_SIZE2/HASH2)"
+            fi
+          } > "publish/${MAN_PUB}"
+          cat "publish/${MAN_PUB}"
+          echo "== 最终发布集 =="
+          ls -l publish
+
+      - name: 创建 release（内核产物 + 配套 APK）
+        env:
+          APK_NAME: ${{ needs.fetch-manager.outputs.apk_name }}
+          APK_SHA: ${{ needs.fetch-manager.outputs.apk_sha256 }}
+          CERT_SIZE: ${{ needs.fetch-manager.outputs.cert_size }}
+          CERT_HASH: ${{ needs.fetch-manager.outputs.cert_hash }}
+          FINASU_TAG: ${{ needs.fetch-manager.outputs.finasu_ref }}
+          BAKASU_TAG: ${{ needs.fetch-manager.outputs.bakasu_tag }}
+          MANAGER_VARIANT: ${{ inputs.ksu_variant || 'FinaSU' }}
+          INPUT_LTO: ${{ inputs.lto_mode || 'none' }}
+          INPUT_TRIM: 'n'
+          INPUT_KCFI: 'false'
+          INPUT_SUSFS: ${{ inputs.enable_susfs }}
+          INPUT_SIGN: ${{ inputs.boot_sign || '不签名' }}
+        run: |
+          set -euo pipefail
+          RUN="${{ github.run_number }}"
+          # 一仓库双管理器：release / latest 按 variant 分流，互不覆盖
+          # （FinaSU 保持 meizu21-finatsu-N / meizu21-latest 完全不变）
+          case "${MANAGER_VARIANT}" in
+            BakaSU)
+              TAG="meizu21-special-bakasu-${RUN}"; LATEST_TAG=""; TITLE_MODEL="魅族 21 特殊产物 BakaSU"
+              SLOT_DESC="Custom 槽 KSU_EXPECTED_SIZE/HASH + CONFIG_KSU_MULTI_MANAGER_SUPPORT=y，官方 KernelSU 管理器同样可用"
+              ;;
+            *)
+              TAG="meizu21-special-finatsu-${RUN}"; LATEST_TAG=""; TITLE_MODEL="魅族 21 特殊产物 FinaSU"
+              SLOT_DESC="第二信任槽 KSU_EXPECTED_SIZE2/HASH2"
+              ;;
+          esac
+          echo "variant=${MANAGER_VARIANT} tag=${TAG} latest=${LATEST_TAG}"
+
+          cat > notes.md <<EOF
+          GKI android14-6.1.25 / os_patch 2023-10 / LTO=none / ${MANAGER_VARIANT} + SUSFS
+
+          ## boot.img 结构
+          96 MiB（100,663,296 B）：克隆原厂 Boot Header v4 + 注入原厂 AVB0 + AVBf Footer。
+          魅族 ABL 即使 BL 已解锁也强制校验这两块，缺了必定直接跳回 Fastboot。
+          打包器与原厂产线等价：用原厂 Image 复现原厂 boot.img，逐字节 diff = 0。
+
+          ## 配套管理器（**必须装本 release 附带的那份**）
+          | 项 | 值 |
+          |---|---|
+          | APK | \`${APK_NAME:-未知}\` |
+          | APK sha256 | \`${APK_SHA:-未知}\` |
+          | FinaSU 版本 | ${FINASU_TAG:-unknown} |
+          | 内核内嵌证书 size | ${CERT_SIZE:-未知} |
+          | 内核内嵌证书 sha256 | \`${CERT_HASH:-未知}\` |
+
+          内核把上面这份 APK 的签名证书编进了信任槽（${MANAGER_VARIANT} 线：
+          ${SLOT_DESC}）。装别的版本会导致
+          管理器识别不到内核（提示"需要更新内核"或无法获取 root）。
+
+          <details><summary>本次运行的输入（便于复现）</summary>
+
+          | 项 | 值 |
+          |---|---|
+          | manager_variant | ${MANAGER_VARIANT} |
+          | finasu_ref | ${FINASU_TAG:-unknown} |
+          | bakasu_ref | ${BAKASU_TAG:-未使用} |
+          | lto_mode | ${INPUT_LTO} |
+          | trim_unused_ksyms | ${INPUT_TRIM} |
+          | strict_kcfi | ${INPUT_KCFI} |
+          | enable_susfs | ${INPUT_SUSFS} |
+          | boot_sign | ${INPUT_SIGN} |
+
+          </details>
+
+          ## 刷入（A/B 设备，务必先备份当前槽位）
+          \`\`\`bash
+          # 备份（已 root）
+          adb shell su -c "dd if=/dev/block/by-name/boot\${SLOT} of=/sdcard/boot_stock.img"
+          adb pull /sdcard/boot_stock.img
+
+          # 刷入非活动槽
+          fastboot flash boot_b boot.img
+          fastboot --set-active=b
+
+          # 回退
+          fastboot --set-active=a
+          \`\`\`
+
+          ## 开机后自检
+          \`\`\`bash
+          adb shell uname -r                                            # 6.1.25-android14-11-maybe-dirty
+          adb shell "lsmod | wc -l"                                     # 期望 ~471
+          adb shell "cat /proc/mz_scheduler/vip_task/enabled"            # 期望 0x1c
+          adb shell "cat /proc/mz_watermark_opt/low_high_watermark_ratio" # 期望 3
+          adb shell "cat /proc/mz_memory/mm_protect/protect_size"        # 期望 614400
+          \`\`\`
+          EOF
+
+          # 主 release
+          gh release create "$TAG" --prerelease --title "${TITLE_MODEL} ${TAG}" \
+            --notes-file notes.md publish/*
+          echo "已创建 release: $TAG"
+
+          # ★ 特殊产物【刻意不更新任何 latest 别名】。
+          #   用户要求：特殊产物只出 pre，不列入 latest ——
+          #   避免「默认推荐版本」被这种全功能面构建覆盖。
+          #   默认版本仍由标准线 meizu21.yml 的 meizu21-latest / meizu21-bakasu-latest 维护。
+          echo "已按要求跳过 latest 更新（特殊产物不进 latest）: $TAG"
+
+      # 一仓库双管理器：BakaSU 线推到 dist-meizu21-bakasu，绝不覆盖 FinaSU 的 dist-meizu21
+      - name: 推送 dist 分支（21 线产物留档，不覆盖 21 Pro 的 dist；按 variant 分开）
+        env:
+          MANAGER_VARIANT: ${{ inputs.ksu_variant || 'FinaSU' }}
+        run: |
+          set -euo pipefail
+          cd publish
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          case "${MANAGER_VARIANT:-FinaSU}" in
+            BakaSU) DIST_BRANCH="dist-meizu21-special-bakasu" ;;
+            *)      DIST_BRANCH="dist-meizu21-special-finatsu" ;;
+          esac
+          git checkout -q -b "$DIST_BRANCH"
+          git add -A
+          git commit -q -m "dist: run ${{ github.run_number }}"
+          git push --force \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "$DIST_BRANCH"
+          echo "$DIST_BRANCH 分支已更新"
