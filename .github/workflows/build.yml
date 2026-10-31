@@ -2059,11 +2059,12 @@ jobs:
             RB_FAIL=0
             while IFS= read -r pf; do
               [ -n "$pf" ] || continue
-              if git -C "$COMMON" checkout -- "$pf" 2>/dev/null; then
+              # 不再 2>/dev/null：checkout 失败必须先看到原因再决定
+              if _rb_err=$(git -C "$COMMON" checkout -- "$pf" 2>&1); then
                 RB_OK=$((RB_OK + 1))
               else
                 RB_FAIL=$((RB_FAIL + 1))
-                echo "::warning title=回滚失败::$pf 无法 checkout 回原状"
+                echo "::warning title=回滚失败::$pf -> $_rb_err"
               fi
             done <<< "$PATCH_FILES"
             echo "  回滚完成: 成功 $RB_OK 个文件, 失败 $RB_FAIL 个"
@@ -2076,6 +2077,26 @@ jobs:
           fi
 
           # ---- 第 2 层b: kit 幂等脚本（容错：单文件失败不中止）----
+          # ⚠ 魅族21 有完整 patch 时跳过 2b：
+          #   `魅族21/device/patches/01-m2461-*.patch` 是从
+          #   apply_kit_onemind + apply_kmi_exports 的输出反向生成的，**已包含**
+          #   2b（kit 脚本）所做的全部内容（去 static、导出、hook 声明等）。
+          #   再跑 2b 会重复劳动，且因两者文本写法不同而导致 marker 误判：
+          #     run#21 实测 2b 对 shrink_active/shared_inactive/shared_list 的
+          #     去 static 全被 [SKIP]（marker 认为已打过），但导出语句照加 ->
+          #     mm/vmscan.o: error: local symbol shrink_* was exported
+          #   所以：有本机型完整 patch 时，2b 跳过，只保留 2c 做幂等校验。
+          # 判据必须是「patch 干净应用成功」（即 REJ_LIST 为空且未被回滚），
+          # 而不是「patch 文件存在」——因为：
+          #   · 魅族21 的 patch 是完整补丁，干净应用 -> 跳过 2b（内容已全覆盖）
+          #   · 21 Pro 的 patch 会产生 3 个 .rej -> 已被回滚 -> 必须跑 2b/2c
+          KIT_SCRIPT_NEEDED=1
+          if [ -n "${PATCH:-}" ] && [ "${REJ_LIST:-}" = "" ] && [ "${KIT_PATCH_COMPLETE:-0}" = "0" ]; then
+            KIT_SCRIPT_NEEDED=0
+            echo "  本机型 patch 干净应用（$(basename "$PATCH")），跳过 2b kit 脚本（内容已覆盖）"
+          fi
+
+          if [ "$KIT_SCRIPT_NEEDED" = "1" ]; then
           # 原版 patch_file 在锚点缺失时 raise 会中止整个脚本，导致
           # vmscan/vmstat 的改动全部丢失。这里包一层，改为逐个容错。
           echo "--- 2b: kit 幂等接法（容错模式）---"
@@ -2103,6 +2124,7 @@ jobs:
               traceback.print_exc()
           PYEOF
           echo "  kit 幂等接法结束"
+          fi   # KIT_SCRIPT_NEEDED == 1 -> 2b 结束
 
           # ---- 第 2 层c: 我们的 apply_kit_onemind.py（kCFI 保活 + OneMind）----
           # 它只负责 vmscan 的 shrink_slab_kcfi_ref 与 OneMind 8 Hook 调用点，
