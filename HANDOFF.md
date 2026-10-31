@@ -511,3 +511,70 @@ release `meizu21-finatsu-11` 与 `meizu21-latest`，`dist-meizu21` 分支已建�
 
 拿 `meizu21-finatsu-14` 的 `boot.img` 跑 `FLASH_SOP.md` §1.4 的 `audit_boot.py`，
 全 OK 后**只刷非活动槽**，验证开机 / Root / 管理器识别 / SUSFS。
+
+---
+
+## 15. kit patch 流程的坑（2026-10-31 下午）
+
+为魅族21 建立静态 kit patch（`魅族21/device/patches/01-m2461-kmi-and-onemind.patch`）
+并把构建切到 patch 流程。过程中踩了 4 个坑，**全部只在「第一次真正走这条路」时才暴露**。
+
+### 坑 1：PATCH 路径写死文件名
+```bash
+# ❌ 原来：魅族21 的文件叫 01-m2461-...，永远匹配不到
+PATCH="${DEVICE_DIR}/patches/01-m2481-ko-krcrc-and-onemind.patch"
+```
+后果：`[ ! -f "$PATCH" ]` 恒真 → 永远走「patch 缺失 → 脚本注入」分支，
+**patch 文件加了也等于没加**。
+
+修法：glob `device/patches/*.patch`，恰好 1 个才用，多个直接硬失败。
+
+### 坑 2：生成 patch 的基线用错了 commit
+| | 用的 | CI 实际用的 |
+|---|---|---|
+| 来源 | `refs/tags/android14-6.1-2023-10_r1` | `deprecated/android14-6.1-2023-10` **分支 HEAD** |
+| `vendor_hooks.c` | 346 行 | **350 行**（多 4 个导出） |
+
+差的 4 行里最后一个正是 `android_vh_filemap_get_folio`，而 patch 的锚点期望文件以
+`android_vh_bus_iommu_probe` 结尾 → **必然 2 个 `.rej`**。
+
+**重建 patch 必须用 CI 同一次构建的 commit**：
+```bash
+# 从 CI 日志取 REMOTE_BRANCH=<sha>
+curl -sS "https://android.googlesource.com/kernel/common/+/<SHA>/<path>?format=TEXT" | base64 -d
+```
+
+### 坑 3：「部分应用」会与兜底脚本叠加（redefinition）
+patch 对 `vmscan.c` 成功、对 `mm.h`/`vendor_hooks.c` 被拒 → 门禁回退 2b/2c
+→ 2b 幂等跳过、2c 不认 2b 的标记又插一份 →
+```
+mm/vmscan.c:1057: error: redefinition of 'shrink_slab_kcfi_ref'
+```
+**全成功和全失败都不触发，唯独「部分成功」会。**
+
+修法：走兜底前按 patch 的文件清单 `git checkout` 回滚。
+`git apply -R` 在部分应用时会失败（已实测），不能用。
+
+### 坑 4：patch 与 2b 内容重叠，导出 static 符号（本轮最新）
+```c
+mm/vmscan.o: error: local symbol shrink_inactive_list was exported
+```
+魅族21 的 patch 是从 `apply_kit_onemind` + `apply_kmi_exports` 反向生成的，
+**已完整含 2b 的全部内容**。但 2b 的 marker（如
+`\nunsigned long shrink_inactive_list(`）在 patch 应用后命中 → 判定「已打过」
+→ **跳过【去 static】，而【导出语句】照加** → 导出 static 函数 → 内核拒绝。
+
+修法：2b 判据从「patch 文件存在」改为「**patch 干净应用（零 `.rej`）**」：
+- 魅族21 / 21 Pro：patch 干净应用 → 跳过 2b
+- patch 有 `.rej` → 回滚后跑 2b+2c
+- 无 patch → 跑 2b+2c
+
+**实测补充**：21 Pro 的 patch 在 CI 实际 commit 上也是**零 `.rej`** 的
+（我之前用 `_r1` tag 测出 3 个 `.rej`，是基线错误导致的误判）。
+它在 patch 应用后，2c 也全部「跳过」——说明 21 Pro 的 patch 同样完整。
+
+### 一条方法论
+
+这 4 个坑有个共同点：**都是「本地验证通过、CI 才炸」**。
+根因是本地用的源码基线（tag）与 CI 实际用的（分支 HEAD）不同。
+**以后任何与内核源码交互的验证，都必须用 CI 那一次构建的 commit**。
