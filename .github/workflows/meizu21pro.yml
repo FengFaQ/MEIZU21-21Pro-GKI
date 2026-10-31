@@ -139,7 +139,11 @@ jobs:
       finasu_ref: ${{ steps.fetch.outputs.tag }}
       # BakaSU 线：tag 指向的提交（与 APK 的 versionCode 同源，传给 build.yml
       # 对齐内核侧 KSU 版本）+ 实际使用的 release tag
-      ksu_commit: ${{ steps.cert.outputs.ksu_commit }}
+      # ⚠ 该值由 id: bakasu 步骤（拉取 BakaSU 指定版本 APK 时解析 tag->commit）写出，
+      #   不是 steps.cert。此前误写成 steps.cert 导致恒为空，BakaSU 内核停留在
+      #   clone 到的 main HEAD，KSU_VERSION 与 APK versionCode 错位
+      #   （实测 35253 vs 35171，管理器会提示"需要更新内核"）。
+      ksu_commit: ${{ steps.bakasu.outputs.ksu_commit }}
       bakasu_tag: ${{ steps.bakasu.outputs.tag }}
       # 两条线共用的中间输出（来自 cert 步骤）
       cert_src: ${{ steps.cert.outputs.cert_src }}
@@ -642,7 +646,10 @@ jobs:
           if gh release view "$LATEST_TAG" >/dev/null 2>&1; then
             gh release delete "$LATEST_TAG" --yes --cleanup-tag || true
           fi
-          gh release create "$LATEST_TAG" --prerelease \
+          # ★ latest 别名一律【正式发布】（不带 --prerelease）：
+          #   这样在 Releases 页面直接可见，不必去 Pre-release 折叠区翻找。
+          #   普通构建（带 run_number 的 tag）仍然是 prerelease。
+          gh release create "$LATEST_TAG" \
             --title "${TITLE_MODEL} (latest)" --notes-file notes.md publish/* || true
           echo "已更新 latest 别名"
 
