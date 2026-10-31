@@ -1762,12 +1762,44 @@ jobs:
           PATCH="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}/patches/01-m2481-ko-krcrc-and-onemind.patch"
           # kit 补丁是「21 Pro（m2481）专属」的 15 文件 patch：
           #   · onemind 的 DECLARE_HOOK / ko krcrc 都来自 21 Pro 的 kit
-          #   · 21 普通版（m2461）目前没有对应 patch，走"跳过"分支
-          #     —— 缺的是 onemind hook 与 ko 侧 krcrc 结构，不影响
-          #        门禁 2 的 __kcrctab 二进制 CRC 锁定（那是独立脚本）。
+          #   · 21 普通版（m2461）没有对应 patch
           # 以后为 21 也做出 patch 时，把文件名统一留在这里即可自动接上。
           if [ ! -f "$PATCH" ]; then
-            echo "::warning title=跳过 kit 补丁::缺 $PATCH（该机型没有专属 patch，正常）"
+            echo "::warning title=跳过 kit 补丁::缺 $PATCH（该机型没有专属 patch）"
+            # ---------------------------------------------------------------
+            # ⚠ run#3 实测（重要）：
+            #   以前这里直接 exit 0，等于把【OneMind 8 大 Hook 注入】一起跳过了。
+            #   而门禁 2 会硬校验这 16 个导出符号
+            #   （__tracepoint_*/__traceiter_* android_vh_*），于是 21 必然卡在门禁 2：
+            #       [ERROR] Missing Meizu OneMind MM Hook exports: [ ...16 个... ]
+            #   已核实：这 16 个符号在【魅族21 自己的原厂 stock_Module.symvers】
+            #   里 16/16 全部存在 —— 说明 21 的厂商 .ko 真的 NEED 它们，
+            #   **不是门禁写错**。缺了就算绕过门禁刷进去也会 Unknown symbol 卡第一屏。
+            #
+            #   所以：kit patch 缺失时，只跳过 patch 本身（ko 侧 krcrc 等
+            #   m2481 专属改动），但【仍无条件执行 OneMind 注入】。
+            #   apply_kit_onemind.py 本身与 kit patch 无关：自带 hook 定义、
+            #   complete-if-missing 语义、锚点必须恰好命中 1 次，锚点不中就 FAIL
+            #   （宁可构建失败，也不产出半成品镜像）。
+            # ---------------------------------------------------------------
+            echo "=== 改用 apply_kit_onemind.py 单独注入 OneMind 8 大 Hook + kCFI 保活 ==="
+            mkdir -p "$GITHUB_WORKSPACE/build-logs"
+            set +e
+            python3 "$GITHUB_WORKSPACE/scripts/apply_kit_onemind.py" --kernel-root "$COMMON" 2>&1 \
+              | tee -a "$GITHUB_WORKSPACE/build-logs/kit_onemind.log"
+            ONEMIND_RC=${PIPESTATUS[0]}
+            set -e
+            echo "apply_kit_onemind 退出码: $ONEMIND_RC"
+            if [ "$ONEMIND_RC" -ne 0 ]; then
+              echo "::error title=OneMind 注入失败::apply_kit_onemind.py 返回 $ONEMIND_RC。"
+              echo "  该机型的 AOSP 源码树与 m2481 kit 的锚点不匹配。"
+              echo "  需要为它单独做一份 anchor 适配(参见 21 Pro 的 kit patch), 不能跳过:"
+              echo "  跳过 -> 门禁 2 必失败(16 个 OneMind hook 缺失), 镜像刷进去也会 Unknown symbol。"
+              echo "  详见 build-logs/kit_onemind.log"
+              exit 1
+            fi
+            echo "OK: OneMind 注入完成（kit patch 本体仍跳过）"
+            git -C "$COMMON" diff --stat 2>/dev/null | tail -20 || true
             exit 0
           fi
 
