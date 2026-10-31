@@ -385,29 +385,47 @@ def apply_call_sites(p):
                 p.fail("%s 里 kvmalloc_node 锚点出现 %d 次" % (rel, src.count(a)))
 
     # --- mm/readahead.c: ondemand_readahead -> ra_tuning_max_page ---
+    #
+    # ⚠ run#5 实测（魅族21，编译期 3 个 error）：
+    #   原实现把 hook 插在【函数体开头】（第一个 '{' 之后），且传值 max_pages。
+    #   但 6.1 的 ondemand_readahead 里 max_pages 是局部变量、声明在函数体中段，
+    #   于是编译报：
+    #       error: use of undeclared identifier 'max_pages'   (x2)
+    #       error: mixing declarations and code ... [-Wdeclaration-after-statement]
+    #
+    #   更严重的是【语义 bug】：hook 签名是
+    #       TP_PROTO(struct readahead_control *ractl, unsigned long *max_pages)
+    #   必须传 &max_pages，mz_readahead_opt 才能【改写】该值来抑制 UFS 4.0
+    #   预读放大。传值的话即使编译通过，OneMind 的预读抑制也完全无效。
+    #
+    #   正确锚点与写法以 21 Pro kit patch 为准（patch 里 mm/readahead.c 的 hunk）：
+    #       if (req_size > max_pages && bdi->io_pages > max_pages)
+    #               max_pages = min(req_size, bdi->io_pages);
+    #       trace_android_vh_ra_tuning_max_page(ractl, &max_pages);
+    #   已核对 AOSP android14-6.1-2023-10_r1 的 mm/readahead.c 第 591-592 行，
+    #   该两行唯一存在，锚点稳定。
     rel = "mm/readahead.c"
     if os.path.isfile(p.path(rel)):
         src = p.read(rel)
         if "trace_android_vh_ra_tuning_max_page" in src:
             p.note("  跳过(已打过): %s (ra_tuning_max_page)" % rel)
-        elif True:
-            a = "static void ondemand_readahead(struct readahead_control *ractl,"
+        else:
+            a = ("\tif (req_size > max_pages && bdi->io_pages > max_pages)\n"
+                 "\t\tmax_pages = min(req_size, bdi->io_pages);\n")
             if src.count(a) == 1:
-                i = src.index(a)
-                j = src.index("{", i)
-                block = ("\n\t/* %s: OneMind mz_readahead_opt 抑制 UFS 4.0 预读放大 */\n"
-                         "\tif (max_pages)\n"
-                         "\t\ttrace_android_vh_ra_tuning_max_page(ractl, max_pages);\n" % MARK)
-                src = src[:j + 1] + block + src[j + 1:]
+                block = a + ("\t/* %s: OneMind mz_readahead_opt 抑制 UFS 4.0 预读放大 */\n"
+                             "\ttrace_android_vh_ra_tuning_max_page(ractl, &max_pages);\n" % MARK)
+                src = src.replace(a, block, 1)
                 if "<trace/hooks/mm.h>" not in src:
                     a_inc = "#include <linux/mm.h>\n"
                     if src.count(a_inc) >= 1:
                         src = src.replace(a_inc, a_inc + "#include <trace/hooks/mm.h>\n", 1)
                 src += "\n/* %s */\n" % (MARK + "_READAHEAD")
                 p.write(rel, src)
-                p.note("  已打: %s (ra_tuning_max_page 调用点)" % rel)
+                p.note("  已打: %s (ra_tuning_max_page 调用点，传 &max_pages)" % rel)
             else:
-                p.fail("%s 里 ondemand_readahead 锚点出现 %d 次" % (rel, src.count(a)))
+                p.fail("%s 里 max_pages 调整锚点出现 %d 次（要求恰好 1 次）"
+                       % (rel, src.count(a)))
 
 
 # ======================================================================
