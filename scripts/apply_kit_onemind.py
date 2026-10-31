@@ -244,6 +244,13 @@ def _ensure_hooks(p, rel, anchor, block, tag):
         p.write(rel, src)
         p.note("  已修: %s (守卫改为镜像 TRACE_HEADER_MULTI_READ，否则 DEFINE_TRACE 不生成)" % rel)
 
+    # 兜底：kit 辅助脚本可能把 8 个 DECLARE_HOOK **无守卫**裸插进头部
+    # （即根本没有 MZ_KIT_P4 的 #ifndef/#define 包裹）。那种形态本身不挡
+    # MULTI_READ 第二遍，无需改守卫；此处仅记录，便于排查。
+    if ("%s_%s" % (MARK, tag)) not in src and re.search(
+            r"DECLARE_HOOK\(\s*%s\s*," % re.escape(names[0]), src):
+        p.note("  注意: %s 里的 hook 是无守卫裸插入（kit 辅助脚本所为），跳过守卫修正" % rel)
+
     declared = [n for n in names
                 if _re.search(r"DECLARE_HOOK\(\s*%s\s*," % _re.escape(n), src)]
 
@@ -280,12 +287,17 @@ def _ensure_hooks(p, rel, anchor, block, tag):
             proto, args = KIT_REFERENCE[n]
             extra += ("DECLARE_HOOK(%s,\n\tTP_PROTO(%s),\n\tTP_ARGS(%s));\n"
                       % (n, proto, args))
+        # ⚠ marker 必须是「插入块里一定会出现」的稳定特征，否则幂等判据失效。
+        #   run#9 教训：marker 曾是 "#ifndef MZ_KIT_P4_MM_H"，而守卫改成
+        #   `#if !defined(...) || defined(TRACE_HEADER_MULTI_READ)` 之后，
+        #   新块里已不再含该字面串 -> marker 永不命中 -> 重复插入 / 判据失效。
+        #   改用每个块都必然带的尾巴注释作 marker。
         p.insert_before(rel, anchor, "\n" + extra + "\n",
-                        "#ifndef %s_%s" % (MARK, tag))
+                        "#endif /* %s_%s */" % (MARK, tag))
         return
 
     # 完全没声明 -> 插入整块
-    p.insert_before(rel, anchor, block, "#ifndef %s_%s" % (MARK, tag))
+    p.insert_before(rel, anchor, block, "#endif /* %s_%s */" % (MARK, tag))
 
 
 # ======================================================================
