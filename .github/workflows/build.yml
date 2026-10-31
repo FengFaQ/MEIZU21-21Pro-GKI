@@ -2054,23 +2054,36 @@ jobs:
           #   run#21 实测：重复时 mm.h 报 34 条 redefinition。
           #   这条校验很便宜，但能挡住「将来又加一层」的情况。
           echo "=== DECLARE_HOOK 次数校验（每个必须恰好 1 次）==="
+          # ⚠ 每个 hook 只属于一个头文件（6 个在 mm.h、2 个在 vmscan.h）。
+          #   原实现用「每个头文件 × 全部 8 个 hook」的笛卡尔积遍历，会为
+          #   不属于该文件的 hook 打出 8 条假 WARN（例如 mm.h 里报
+          #   memcg_protect_lru_gen_add_folio 未声明），日志噪音且误导排查。
+          #   改成按文件分组，只在该 hook 应出现的文件里校验。
           HOOK_DUP=0
-          for hdr in "$COMMON/include/trace/hooks/mm.h" "$COMMON/include/trace/hooks/vmscan.h"; do
-            [ -f "$hdr" ] || continue
-            for hook in extfrag_for_order tune_watermark_ratio mm_vip_alloc_harder \
-                        mm_vip_alloc_harder_stat mm_vip_kvmalloc ra_tuning_max_page \
-                        memcg_filepages_protect memcg_protect_lru_gen_add_folio; do
+          HOOK_MISSING=0
+          check_hooks() {
+            hdr="$1"; shift
+            [ -f "$hdr" ] || return 0
+            for hook in "$@"; do
               n=$(grep -c "DECLARE_HOOK(android_vh_${hook}," "$hdr" 2>/dev/null || true)
               if [ "${n:-0}" -gt 1 ]; then
                 echo "::error title=hook 声明重复::$(basename "$hdr") 里 android_vh_${hook} 出现 ${n} 次（期望 1），会导致 redefinition"
                 HOOK_DUP=1
               elif [ "${n:-0}" -eq 0 ]; then
-                echo "  WARN $(basename "$hdr"): android_vh_${hook} 未声明（该 hook 可能缺失）"
+                echo "::error title=hook 声明缺失::$(basename "$hdr") 里找不到 android_vh_${hook} 声明"
+                HOOK_MISSING=1
               fi
             done
-          done
+          }
+          check_hooks "$COMMON/include/trace/hooks/mm.h" \
+              extfrag_for_order tune_watermark_ratio mm_vip_alloc_harder \
+              mm_vip_alloc_harder_stat mm_vip_kvmalloc ra_tuning_max_page
+          check_hooks "$COMMON/include/trace/hooks/vmscan.h" \
+              memcg_filepages_protect memcg_protect_lru_gen_add_folio
           [ "$HOOK_DUP" -eq 0 ] || exit 1
-          echo "  OK  8 个 hook 声明次数均为 1"
+          # 缺失原本只是 WARN，但门禁 2 会因缺符号硬失败，这里提前拦截更省时间
+          [ "$HOOK_MISSING" -eq 0 ] || exit 1
+          echo "  OK  8 个 hook 声明次数均为 1（按文件分组校验）"
 
           # ---- OneMind hook 签名一致性(与 kit patch 原文逐字符比对) ----
           python3 "$GITHUB_WORKSPACE/scripts/apply_kit_onemind.py" --kernel-root "$COMMON" 2>&1 \
