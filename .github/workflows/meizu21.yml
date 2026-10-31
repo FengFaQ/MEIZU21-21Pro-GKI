@@ -113,6 +113,8 @@ concurrency:
 
 env:
   FINASU_REPO: LyraVoid/FinaSU
+  # 一仓库双管理器：BakaSU 线专用仓库（job1 拉 APK、build 解析 tag->commit 都用它）
+  BAKASU_REPO: Baka-SU/BakaSU
 
 jobs:
   # ==========================================================================
