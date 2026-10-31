@@ -411,7 +411,14 @@ jobs:
       # ⚠ use_kpm / droidspaces / artifact_upload_mode 是 string，必须加引号：
       #   `droidspaces: off` 会被 YAML 1.1 解析成布尔 false。
       use_kpm: 'disabled (关闭)'
-      droidspaces: 'on'
+      # ⚠ droidspaces 这个 input 是【Droidspaces 的 kABI 槽位标识】，不是 on/off 开关：
+      #   build.yml 里 SLOT_NAME=$(echo "$SLOT" | sed 's/\(.\)/\1_/g; s/_$//') 后拼到补丁名：
+      #     below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_${SLOT_NAME}.patch
+      #   上游实际文件名只有 1_2_3 / 3_4_5 / 6_7_8 三种。
+      #   内核 6.1 对应 6_7_8 -> 传 '678'。传 'on' 会得到 o_n -> 找不到补丁。
+      #   （是否启用由 `droidspaces != 'off'` 决定，所以任何非 off 值都会启用；
+      #     但只有正确的槽位值才能找到补丁。）
+      droidspaces: '678'
       artifact_upload_mode: '上传全部'
       # 设备事实目录固定（单机型）。若以后要支持第二机型（21 / M2461），
       # 再把它改成 dispatch input 并相应精简其它 input。
