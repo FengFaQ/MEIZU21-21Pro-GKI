@@ -569,6 +569,29 @@ def apply_vmscan(p):
         else:
             p.fail("%s 里 shrink_slab 函数定义锚点出现 %d 次" % (rel, src.count(anchor)))
 
+    # (a2) memcg_protect_lru_gen_add_folio 的真实定义
+    #
+    # mm_inline.h 里我们对它做了「前置声明 + 调用」，但函数体必须在这里给出：
+    #   21 Pro kit patch 就是在 mm/vmscan.c 的 sort_folio 之前定义它，
+    #   内部转发到 trace hook。没有这个定义 -> 链接期 undefined symbol。
+    if "void memcg_protect_lru_gen_add_folio(" in src:
+        p.note("  跳过(已打过): %s (memcg_protect_lru_gen_add_folio 定义)" % rel)
+    else:
+        a_wrap = ("static bool sort_folio(struct lruvec *lruvec, struct folio *folio, "
+                  "struct scan_control *sc,\n")
+        if src.count(a_wrap) != 1:
+            p.fail("%s 里 sort_folio 定义锚点出现 %d 次，无法插入 "
+                   "memcg_protect_lru_gen_add_folio 定义" % (rel, src.count(a_wrap)))
+        else:
+            wrap_block = ("/* %s: 转发到 trace hook，供 mm_inline.h 的 MGLRU 入队调用 */\n"
+                          "void memcg_protect_lru_gen_add_folio(int type, struct lru_gen_folio *lrugen,\n"
+                          "\t\t\t\t     struct lruvec *lruvec, unsigned long *seq)\n"
+                          "{\n"
+                          "\ttrace_android_vh_memcg_protect_lru_gen_add_folio(type, lrugen, lruvec, seq);\n"
+                          "}\n\n" % MARK)
+            src = src.replace(a_wrap, wrap_block + a_wrap, 1)
+            p.note("  已打: %s (memcg_protect_lru_gen_add_folio 定义)" % rel)
+
     # (b) MGLRU: sort_folio -> memcg_filepages_protect
     #     原厂在 sort_folio 里询问是否绕过回收，保护 600MB 系统核心文件缓存
     #
@@ -688,15 +711,60 @@ def apply_mm_inline(p):
             p.fail("%s 里有 mz_seq 但未能自动还原，会导致编译失败，请人工检查" % rel)
             return
 
-    # 第二步：校验 kit patch 的正确插入是否存在
+    # 第二步：确保 memcg_protect_lru_gen_add_folio 调用存在
+    #
+    # 历史教训（run#22）：早期版本往 lru_gen_add_folio 的 if/else 链【中间】插，
+    # 破坏了 if/else 结构 -> -Wmisleading-indentation + undeclared。
+    # 21 Pro 的 kit patch 则是插在整条 if/else 链【结束之后】：
+    #       else
+    #               seq = lrugen->min_seq[type];
+    #       memcg_protect_lru_gen_add_folio(type, lrugen, lruvec, &seq);
+    #       gen = lru_gen_from_seq(seq);
+    # 且它用的是文件内【自己声明】的普通函数（不是 trace hook），
+    # 所以不需要 #include <trace/hooks/mm.h>。
+    #
+    # 魅族21 没有 kit patch，这里必须自己补上——否则该 tracepoint 虽被
+    # vendor 模块 NEED、也已在 vendor_hooks.c 导出，但内核里没有调用点，
+    # MGLRU 的文件缓存保护不会触发。
     if "memcg_protect_lru_gen_add_folio" in src:
-        p.note("  OK   %s: 已有 memcg_protect_lru_gen_add_folio 调用（kit patch 已正确插入）"
-               % rel)
-    else:
-        # kit 的该 hunk 可能被 reject。**不自己插**（会再次插错位置），只告警：
-        # 该 hook 缺失只影响 MGLRU 下文件缓存保护，不影响开机（非生死线）。
-        p.note("  WARN %s: 未发现 memcg_protect_lru_gen_add_folio 调用"
-               "（kit patch 该 hunk 可能被 reject；不影响开机）" % rel)
+        p.note("  OK   %s: 已有 memcg_protect_lru_gen_add_folio 调用" % rel)
+        return
+
+    # 锚点必须落在 lru_gen_update_size() 的【函数体外】，插在它和
+    # lru_gen_add_folio() 之间；不能只锚定 VM_WARN_ON_ONCE 那一行
+    # （它会命中函数体内部，把声明插进别人的花括号里）。
+    # 该头文件里 lru_gen_add_folio 出现【两次】：
+    #   第 220 行 —— CONFIG_LRU_GEN 的真实实现（有函数体）
+    #   第 300 行 —— #else 分支的假实现（一进来就 return false）
+    # 必须锚定真实实现那一个。用「函数签名 + 其后的局部变量声明」区分，
+    # 只匹配到唯一一处。
+    a_decl = ("\n}\n\n"
+              "static inline bool lru_gen_add_folio(struct lruvec *lruvec, struct folio *folio, bool reclaiming)\n"
+              "{\n\tunsigned long seq;\n")
+    a_call = ("\telse\n\t\tseq = lrugen->min_seq[type];\n\n\tgen = lru_gen_from_seq(seq);\n")
+
+    if src.count(a_decl) != 1 or src.count(a_call) != 1:
+        p.fail("%s 里锚点不唯一（decl=%d call=%d），无法安全插入 memcg_protect hook"
+               % (rel, src.count(a_decl), src.count(a_call)))
+        return
+
+    decl_block = ("\n/* %s: OneMind mz_mm_protect 在 MGLRU 入队时识别 protect memcg */\n"
+                  "void memcg_protect_lru_gen_add_folio(int type, struct lru_gen_folio *lrugen,\n"
+                  "\t\t\t\t     struct lruvec *lruvec, unsigned long *seq);\n"
+                  "\n"
+                  % MARK)
+    # ⚠ 必须插在 a_decl 里那个 "\n}" 【之后】，否则声明会落进
+    #   lru_gen_update_size() 的函数体内部（编译报 expected declaration）。
+    _brace = "\n}"
+    _rest = a_decl[len(_brace):]
+    src = src.replace(a_decl, _brace + decl_block + _rest, 1)
+
+    call_block = ("\telse\n\t\tseq = lrugen->min_seq[type];\n\n"
+                  "\tmemcg_protect_lru_gen_add_folio(type, lrugen, lruvec, &seq);\n\n"
+                  "\tgen = lru_gen_from_seq(seq);\n")
+    src = src.replace(a_call, call_block, 1)
+    p.write(rel, src)
+    p.note("  已打: %s (memcg_protect_lru_gen_add_folio 声明 + 调用点)" % rel)
 
 
 # ======================================================================

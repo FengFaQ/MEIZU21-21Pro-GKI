@@ -1,0 +1,395 @@
+diff --git a/drivers/android/vendor_hooks.c b/drivers/android/vendor_hooks.c
+index c7b6b15..77c8eba 100644
+--- a/drivers/android/vendor_hooks.c
++++ b/drivers/android/vendor_hooks.c
+@@ -344,3 +344,25 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_vmscan_kswapd_done);
+ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_compaction_begin);
+ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_compaction_end);
+ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_bus_iommu_probe);
++
++/* MZ_KIT_P4_VH_EXPORT: OneMind 8 大 Hook 的 KMI 兼容导出 */
++EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_extfrag_for_order);
++EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_memcg_filepages_protect);
++EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_memcg_protect_lru_gen_add_folio);
++EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_vip_alloc_harder);
++EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_vip_alloc_harder_stat);
++EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_mm_vip_kvmalloc);
++EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ra_tuning_max_page);
++EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_tune_watermark_ratio);
++/* MZ_KIT_P4_VH_EXPORT */
++
++/* MZ_KMI_EXPORT: 魅族21 厂商模块 NEED、且 AOSP 上游不存在的 vendor hook（需自造符号）
++ * 注意：mm/vmscan.c 里的标准 TRACE_EVENT 不在此处理，
++ *       它们必须在 mm/vmscan.c 自己的 CREATE_TRACE_POINTS 单元里导出。 */
++#define MZ_KMI_EXPORT_DEFINE_VH(name) \
++	struct tracepoint __tracepoint_##name; \
++	EXPORT_SYMBOL_GPL(__tracepoint_##name); \
++	int __traceiter_##name(void *__data) { return 0; } \
++	EXPORT_SYMBOL_GPL(__traceiter_##name);
++
++MZ_KMI_EXPORT_DEFINE_VH(android_vh_smartzram_tune_swappiness)
+diff --git a/drivers/base/power/wakeup.c b/drivers/base/power/wakeup.c
+index 441092f..cb6d4fa 100644
+--- a/drivers/base/power/wakeup.c
++++ b/drivers/base/power/wakeup.c
+@@ -1238,3 +1238,6 @@ static int __init wakeup_sources_debugfs_init(void)
+ }
+ 
+ postcore_initcall(wakeup_sources_debugfs_init);
++
++/* MZ_KMI_EXPORT: pm_system_irq_wakeup (vendor NEED) */
++EXPORT_SYMBOL_GPL(pm_system_irq_wakeup);
+diff --git a/include/linux/mm_inline.h b/include/linux/mm_inline.h
+index 5567f48..73ca78b 100644
+--- a/include/linux/mm_inline.h
++++ b/include/linux/mm_inline.h
+@@ -216,6 +216,11 @@ static inline void lru_gen_update_size(struct lruvec *lruvec, struct folio *foli
+ 	/* demotion requires isolation, e.g., lru_deactivate_fn() */
+ 	VM_WARN_ON_ONCE(lru_gen_is_active(lruvec, old_gen) && !lru_gen_is_active(lruvec, new_gen));
+ }
++/* MZ_KIT_P4: OneMind mz_mm_protect 在 MGLRU 入队时识别 protect memcg */
++void memcg_protect_lru_gen_add_folio(int type, struct lru_gen_folio *lrugen,
++				     struct lruvec *lruvec, unsigned long *seq);
++
++
+ 
+ static inline bool lru_gen_add_folio(struct lruvec *lruvec, struct folio *folio, bool reclaiming)
+ {
+@@ -248,6 +253,8 @@ static inline bool lru_gen_add_folio(struct lruvec *lruvec, struct folio *folio,
+ 	else
+ 		seq = lrugen->min_seq[type];
+ 
++	memcg_protect_lru_gen_add_folio(type, lrugen, lruvec, &seq);
++
+ 	gen = lru_gen_from_seq(seq);
+ 	flags = (gen + 1UL) << LRU_GEN_PGOFF;
+ 	/* see the comment on MIN_NR_GENS about PG_active */
+diff --git a/include/trace/hooks/mm.h b/include/trace/hooks/mm.h
+index 7018cc8..6b82f65 100644
+--- a/include/trace/hooks/mm.h
++++ b/include/trace/hooks/mm.h
+@@ -158,6 +158,31 @@ struct oom_control;
+ DECLARE_HOOK(android_vh_mm_alloc_pages_may_oom_exit,
+ 	TP_PROTO(struct oom_control *oc, unsigned long did_some_progress),
+ 	TP_ARGS(oc, did_some_progress));
++
++/* MZ_KIT_P4: OneMind 8 大 Hook(MM 部分) —— 签名必须与原厂逐字符一致,
++ * 因为 TP_PROTO 的形参类型参与 __traceiter_* 的 kCFI Type Hash 计算。
++ * 来源: m2481kit/patches/01-m2481-ko-krcrc-and-onemind.patch
++ */
++struct readahead_control;
++DECLARE_HOOK(android_vh_extfrag_for_order,
++	TP_PROTO(void *info, struct zone *zone, unsigned int order),
++	TP_ARGS(info, zone, order));
++DECLARE_HOOK(android_vh_tune_watermark_ratio,
++	TP_PROTO(unsigned int *low_high_wm_ratio),
++	TP_ARGS(low_high_wm_ratio));
++DECLARE_HOOK(android_vh_mm_vip_alloc_harder,
++	TP_PROTO(gfp_t gfp_mask, unsigned int *alloc_flags, int *vip_promote),
++	TP_ARGS(gfp_mask, alloc_flags, vip_promote));
++DECLARE_HOOK(android_vh_mm_vip_kvmalloc,
++	TP_PROTO(gfp_t *flags),
++	TP_ARGS(flags));
++DECLARE_HOOK(android_vh_mm_vip_alloc_harder_stat,
++	TP_PROTO(unsigned int alloc_flags, unsigned long alloc_start, unsigned int order),
++	TP_ARGS(alloc_flags, alloc_start, order));
++DECLARE_HOOK(android_vh_ra_tuning_max_page,
++	TP_PROTO(struct readahead_control *ractl, unsigned long *max_pages),
++	TP_ARGS(ractl, max_pages));
++
+ #endif /* _TRACE_HOOK_MM_H */
+ 
+ /* This part must be outside protection */
+diff --git a/include/trace/hooks/vmscan.h b/include/trace/hooks/vmscan.h
+index f9effdd..bd5247b 100644
+--- a/include/trace/hooks/vmscan.h
++++ b/include/trace/hooks/vmscan.h
+@@ -53,6 +53,18 @@ DECLARE_HOOK(android_vh_vmscan_kswapd_done,
+ 	TP_PROTO(int node_id, unsigned int highest_zoneidx, unsigned int alloc_order,
+ 	        unsigned int reclaim_order),
+ 	TP_ARGS(node_id, highest_zoneidx, alloc_order, reclaim_order));
++
++/* MZ_KIT_P4: OneMind 8 大 Hook(MGLRU 部分), 签名与原厂一致 */
++struct lruvec;
++struct lru_gen_folio;
++DECLARE_HOOK(android_vh_memcg_filepages_protect,
++	TP_PROTO(struct lruvec *lruvec, int file, bool *bypass),
++	TP_ARGS(lruvec, file, bypass));
++DECLARE_HOOK(android_vh_memcg_protect_lru_gen_add_folio,
++	TP_PROTO(int type, struct lru_gen_folio *lrugen, struct lruvec *lruvec,
++		unsigned long *seq),
++	TP_ARGS(type, lrugen, lruvec, seq));
++
+ #endif /* _TRACE_HOOK_VMSCAN_H */
+ /* This part must be outside protection */
+ #include <trace/define_trace.h>
+diff --git a/kernel/module/version.c b/kernel/module/version.c
+index 53f43ac..931277e 100644
+--- a/kernel/module/version.c
++++ b/kernel/module/version.c
+@@ -51,8 +51,12 @@ int check_version(const struct load_info *info,
+ 	return 1;
+ 
+ bad_version:
+-	pr_warn("%s: disagrees about version of symbol %s\n", info->name, symname);
+-	return 0;
++	/* MZ_KIT_P4: 放行 krcrc(MODVERSIONS) 符号 CRC 不一致 —— 魅族 471 个原厂 .ko
++	 * 的 CRC 与自编译内核可能有微小差异, 这里按 kit 的做法直接判为兼容,
++	 * 作为符号名匹配之外的"双保险"(符号名/命名空间仍严格校验)。
++	 * 注意: 只放宽 CRC, 不放宽符号缺失 —— 缺失符号仍然由 resolve_symbol 报错。
++	 */
++	return 1;
+ }
+ 
+ int check_modstruct_version(const struct load_info *info,
+diff --git a/mm/memcontrol.c b/mm/memcontrol.c
+index cb92899..22a2ca1 100644
+--- a/mm/memcontrol.c
++++ b/mm/memcontrol.c
+@@ -5179,6 +5179,13 @@ static inline void mem_cgroup_id_put(struct mem_cgroup *memcg)
+ 	mem_cgroup_id_put_many(memcg, 1);
+ }
+ 
++/* MZ_KMI_EXPORT: 厂商 smartswap_zram.ko NEED mem_cgroup_id_put2 */
++void mem_cgroup_id_put2(struct mem_cgroup *memcg)
++{
++	mem_cgroup_id_put_many(memcg, 1);
++}
++EXPORT_SYMBOL_GPL(mem_cgroup_id_put2);
++
+ /**
+  * mem_cgroup_from_id - look up a memcg from a memcg id
+  * @id: the memcg id to look up
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 501d69a..ddc0c73 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -4957,6 +4957,14 @@ gfp_to_alloc_flags(gfp_t gfp_mask)
+ 		alloc_flags &= ~ALLOC_CPUSET;
+ 	} else if (unlikely(rt_task(current)) && in_task())
+ 		alloc_flags |= ALLOC_HARDER;
++	else {
++		int vip_promote = 0;
++
++		/* MZ_KIT_P4: OneMind mz_mm_vip 给前台 VIP 线程 ALLOC_HARDER 特权 */
++		trace_android_vh_mm_vip_alloc_harder(gfp_mask, &alloc_flags, &vip_promote);
++		if (vip_promote)
++			alloc_flags |= ALLOC_HARDER;
++	}
+ 
+ 	alloc_flags = gfp_to_alloc_flags_cma(gfp_mask, alloc_flags);
+ 
+@@ -5194,6 +5202,9 @@ restart:
+ 	if (page)
+ 		goto got_pg;
+ 
++	/* MZ_KIT_P4: OneMind mz_mm_vip 统计 VIP 线程慢路径分配耗时 */
++	trace_android_vh_mm_vip_alloc_harder_stat(alloc_flags, alloc_start, order);
++
+ 	/*
+ 	 * For costly allocations, try direct compaction first, as it's likely
+ 	 * that we have enough base pages and don't need to reclaim. For non-
+@@ -8856,6 +8867,8 @@ static void __setup_per_zone_wmarks(void)
+ 	unsigned long lowmem_pages = 0;
+ 	struct zone *zone;
+ 	unsigned long flags;
++	/* MZ_KIT_P4: OneMind mz_watermark_opt 水位比 */
++	unsigned int low_high_wm_ratio = 1;
+ 
+ 	/* Calculate total number of !ZONE_HIGHMEM pages */
+ 	for_each_zone(zone) {
+@@ -8902,8 +8915,17 @@ static void __setup_per_zone_wmarks(void)
+ 				      watermark_scale_factor, 10000));
+ 
+ 		zone->watermark_boost = 0;
+-		zone->_watermark[WMARK_LOW]  = min_wmark_pages(zone) + tmp;
+-		zone->_watermark[WMARK_HIGH] = low_wmark_pages(zone) + tmp;
++		/* MZ_KIT_P4: 厂商可调 LOW/HIGH 水位比 */
++		trace_android_vh_tune_watermark_ratio(&low_high_wm_ratio);
++		if (low_high_wm_ratio != 1) {
++			zone->_watermark[WMARK_LOW] = min_wmark_pages(zone) +
++				(2 * tmp * low_high_wm_ratio) / (low_high_wm_ratio + 1);
++			zone->_watermark[WMARK_HIGH] = low_wmark_pages(zone) +
++				(2 * tmp) / (low_high_wm_ratio + 1);
++		} else {
++			zone->_watermark[WMARK_LOW]  = min_wmark_pages(zone) + tmp;
++			zone->_watermark[WMARK_HIGH] = low_wmark_pages(zone) + tmp;
++		}
+ 		zone->_watermark[WMARK_PROMO] = high_wmark_pages(zone) + tmp;
+ 
+ 		spin_unlock_irqrestore(&zone->lock, flags);
+@@ -9862,3 +9884,5 @@ bool has_managed_dma(void)
+ 	return false;
+ }
+ #endif /* CONFIG_ZONE_DMA */
++
++/* MZ_KIT_P4_PAGEALLOC */
+diff --git a/mm/readahead.c b/mm/readahead.c
+index 844e813..5228ca1 100644
+--- a/mm/readahead.c
++++ b/mm/readahead.c
+@@ -590,6 +590,8 @@ static void ondemand_readahead(struct readahead_control *ractl,
+ 	 */
+ 	if (req_size > max_pages && bdi->io_pages > max_pages)
+ 		max_pages = min(req_size, bdi->io_pages);
++	/* MZ_KIT_P4: OneMind mz_readahead_opt 抑制 UFS 4.0 预读放大 */
++	trace_android_vh_ra_tuning_max_page(ractl, &max_pages);
+ 
+ 	/*
+ 	 * start of file
+@@ -858,3 +860,5 @@ void readahead_expand(struct readahead_control *ractl,
+ 	}
+ }
+ EXPORT_SYMBOL(readahead_expand);
++
++/* MZ_KIT_P4_READAHEAD */
+diff --git a/mm/util.c b/mm/util.c
+index 4afa7dd..3c78425 100644
+--- a/mm/util.c
++++ b/mm/util.c
+@@ -1,5 +1,6 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ #include <linux/mm.h>
++#include <trace/hooks/mm.h>
+ #include <linux/slab.h>
+ #include <linux/string.h>
+ #include <linux/compiler.h>
+@@ -566,6 +567,9 @@ void *kvmalloc_node(size_t size, gfp_t flags, int node)
+ 	gfp_t kmalloc_flags = flags;
+ 	void *ret;
+ 
++	/* MZ_KIT_P4: OneMind mz_mm_vip 优化 VIP 线程 kvmalloc 回退策略 */
++	trace_android_vh_mm_vip_kvmalloc(&flags);
++
+ 	/*
+ 	 * We want to attempt a large physically contiguous block first because
+ 	 * it is less likely to fragment multiple larger blocks and therefore
+@@ -1196,3 +1200,5 @@ void flush_dcache_folio(struct folio *folio)
+ }
+ EXPORT_SYMBOL(flush_dcache_folio);
+ #endif
++
++/* MZ_KIT_P4_UTIL */
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 001767e..a656503 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -1040,6 +1040,16 @@ out:
+ 	return freed;
+ }
+ 
++/*
++ * MZ_KIT_P4: 厂商模块 mz_kshrink_slabd 用 kallsyms 取到 shrink_slab 后经函数指针
++ * 间接调用。若内核树内无任何取地址操作，Clang 会优化掉函数入口前 -4 字节的
++ * kCFI Type Hash(0xc3b4beac)，模块间接调用即 `CFI failure` panic 卡第一屏。
++ * 这里保留一个 __used 函数指针，强制编译器生成类型前导码。
++ */
++static unsigned long (*const shrink_slab_kcfi_ref)(gfp_t, int,
++		struct mem_cgroup *, int) __used = shrink_slab;
++
++
+ static void drop_slab_node(int nid)
+ {
+ 	unsigned long freed;
+@@ -2485,7 +2495,7 @@ static int current_may_throttle(void)
+  * shrink_inactive_list() is a helper for shrink_node().  It returns the number
+  * of reclaimed pages
+  */
+-static unsigned long shrink_inactive_list(unsigned long nr_to_scan,
++unsigned long shrink_inactive_list(unsigned long nr_to_scan,
+ 		struct lruvec *lruvec, struct scan_control *sc,
+ 		enum lru_list lru)
+ {
+@@ -2605,7 +2615,7 @@ static unsigned long shrink_inactive_list(unsigned long nr_to_scan,
+  * The downside is that we have to touch folio->_refcount against each folio.
+  * But we had to alter folio->flags anyway.
+  */
+-static void shrink_active_list(unsigned long nr_to_scan,
++void shrink_active_list(unsigned long nr_to_scan,
+ 			       struct lruvec *lruvec,
+ 			       struct scan_control *sc,
+ 			       enum lru_list lru)
+@@ -2759,7 +2769,7 @@ unsigned long reclaim_pages(struct list_head *folio_list)
+ 	return nr_reclaimed;
+ }
+ 
+-static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
++unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
+ 				 struct lruvec *lruvec, struct scan_control *sc)
+ {
+ 	if (is_active_lru(lru)) {
+@@ -4825,9 +4835,17 @@ static int lru_gen_memcg_seg(struct lruvec *lruvec)
+  *                          the eviction
+  ******************************************************************************/
+ 
++/* MZ_KIT_P4: 转发到 trace hook，供 mm_inline.h 的 MGLRU 入队调用 */
++void memcg_protect_lru_gen_add_folio(int type, struct lru_gen_folio *lrugen,
++				     struct lruvec *lruvec, unsigned long *seq)
++{
++	trace_android_vh_memcg_protect_lru_gen_add_folio(type, lrugen, lruvec, seq);
++}
++
+ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_control *sc,
+ 		       int tier_idx)
+ {
++	bool bypass = false;
+ 	bool success;
+ 	int gen = folio_lru_gen(folio);
+ 	int type = folio_is_file_lru(folio);
+@@ -4891,6 +4909,14 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
+ 		return true;
+ 	}
+ 
++	/* MZ_KIT_P4: OneMind mz_mm_protect 保护系统核心文件缓存免被驱逐 */
++	trace_android_vh_memcg_filepages_protect(lruvec, type, &bypass);
++	if (bypass && gen == lru_gen_from_seq(lrugen->min_seq[type])) {
++		gen = folio_inc_gen(lruvec, folio, false);
++		list_move(&folio->lru, &lrugen->folios[gen][type][zone]);
++		return true;
++	}
++
+ 	return false;
+ }
+ 
+@@ -8189,3 +8215,14 @@ void check_move_unevictable_folios(struct folio_batch *fbatch)
+ 	}
+ }
+ EXPORT_SYMBOL_GPL(check_move_unevictable_folios);
++
++/* MZ_KIT_P4_VMSCAN */
++
++/* MZ_KMI_EXPORT: 对齐原厂 KMI 的导出（reclaim_pages 被 smartswap_zram NEED） */
++EXPORT_SYMBOL_GPL(shrink_inactive_list);
++EXPORT_SYMBOL_GPL(shrink_active_list);
++EXPORT_SYMBOL_GPL(shrink_list);
++EXPORT_SYMBOL_GPL(reclaim_pages);
++/* mm_vmscan_kswapd_wake 是 AOSP 真实 TRACE_EVENT（events/vmscan.h:66），
++ * 本文件顶部已有 CREATE_TRACE_POINTS + include，故可直接导出 */
++EXPORT_TRACEPOINT_SYMBOL_GPL(mm_vmscan_kswapd_wake);
+diff --git a/mm/vmstat.c b/mm/vmstat.c
+index f2f7649..d400cbb 100644
+--- a/mm/vmstat.c
++++ b/mm/vmstat.c
+@@ -28,6 +28,7 @@
+ #include <linux/mm_inline.h>
+ #include <linux/page_ext.h>
+ #include <linux/page_owner.h>
++#include <trace/hooks/mm.h>
+ 
+ #include "internal.h"
+ 
+@@ -1117,6 +1118,8 @@ unsigned int extfrag_for_order(struct zone *zone, unsigned int order)
+ 	struct contig_page_info info;
+ 
+ 	fill_contig_page_info(zone, order, &info);
++	/* MZ_KIT_P4: OneMind mz_compaction_opt 修正高阶空闲块统计 */
++	trace_android_vh_extfrag_for_order(&info, zone, order);
+ 	if (info.free_pages == 0)
+ 		return 0;
+ 
+@@ -2253,3 +2256,5 @@ static int __init extfrag_debug_init(void)
+ 
+ module_init(extfrag_debug_init);
+ #endif
++
++/* MZ_KIT_P4_VMSTAT */
