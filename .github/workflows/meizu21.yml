@@ -438,7 +438,7 @@ jobs:
           EOF
 
           # 主 release
-          gh release create "$TAG" --prerelease --title "21Pro GKI ${TAG}" \
+          gh release create "$TAG" --prerelease --title "魅族 21 GKI ${TAG}" \
             --notes-file notes.md publish/*
           echo "已创建 release: $TAG"
 
@@ -447,7 +447,7 @@ jobs:
             gh release delete meizu21-latest --yes --cleanup-tag || true
           fi
           gh release create meizu21-latest --prerelease \
-            --title "21Pro GKI (latest)" --notes-file notes.md publish/* || true
+            --title "魅族 21 GKI (latest)" --notes-file notes.md publish/* || true
           echo "已更新 latest 别名"
 
       - name: 推送 dist-meizu21 分支（21 线产物留档，不覆盖 21 Pro 的 dist）

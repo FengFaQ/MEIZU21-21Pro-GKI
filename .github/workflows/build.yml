@@ -200,6 +200,48 @@ jobs:
       - name: 检出代码仓库
         uses: actions/checkout@v7
 
+      # ============================================================
+      # 设备事实目录前置校验（两机型共享本流水线）
+      # ------------------------------------------------------------
+      # DEVICE_DIR 由入口工作流通过 workflow_call 的 with: 传入。
+      # 一旦没传/传错，后面的步骤会去读【另一个机型】的设备事实
+      # （KMI 基准 / 原厂 config / AVB 模板全错），而门禁 1 只会表现为
+      # "版本串不符"，把人引向错误方向。
+      # 所以这里显式断言；后续所有引用统一为 ${DEVICE_DIR:?...}，
+      # 不再有静默的 21 Pro 兜底。
+      # ============================================================
+      - name: 校验设备事实目录 (device_dir)
+        env:
+          DEVICE_DIR: ${{ inputs.device_dir }}
+        run: |
+          set -e
+          echo "device_dir 原始值: [${DEVICE_DIR}]"
+          [ -n "${DEVICE_DIR}" ] || { echo "::error title=device_dir 未设置::入口工作流必须传入 device_dir"; exit 1; }
+          DIR="$GITHUB_WORKSPACE/${DEVICE_DIR}"
+          [ -d "$DIR" ] || {
+            echo "::error title=设备事实目录不存在::$DIR"
+            ls -1 "$GITHUB_WORKSPACE" | sed 's/^/  仓库根: /'
+            exit 1; }
+          echo "设备事实目录: $DIR"
+          ls -1 "$DIR" | sed 's/^/  /'
+
+          # 关键文件逐一断言：缺任何一个，后面的门禁都会以误导性的形式失败
+          for f in so.txt ref_stock.config stock_Module.symvers; do
+            [ -f "$DIR/$f" ] || { echo "::error title=设备事实缺失::$DIR/$f 不存在"; exit 1; }
+          done
+          [ -f "$DIR/avb_template/stock_boot_skeleton.img.zlib" ] \
+            || { echo "::error title=设备事实缺失::AVB 骨架不存在"; exit 1; }
+
+          # 解析 so.txt 的 kernel_release。
+          # ⚠ 两份 so.txt 的写法不同：魅族21 是 `kernel_release=...`，
+          #   21 Pro 是 `kernel_release      = ...`（等号两侧有空格）。
+          #   所以分隔符必须是 `[[:space:]]*=[[:space:]]*`，不能只认 `^kernel_release=`，
+          #   否则 21 Pro 永远解析不到（此前门禁 1 一直静默退回 inputs.version）。
+          REL=$(sed -n 's/^kernel_release[[:space:]]*=[[:space:]]*//p' "$DIR/so.txt" | head -1 | tr -d ' \r')
+          [ -n "$REL" ] || { echo "::error title=so.txt 缺 kernel_release::$DIR/so.txt"; exit 1; }
+          echo "kernel_release = $REL"
+          echo "OK: 设备事实目录自检通过"
+
       - name: 初始化构建环境
         run: |
           CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
@@ -1405,13 +1447,20 @@ jobs:
           # ⚠ 白名单路径必须【运行时拼绝对路径】: Kconfig 里相对路径是相对内核
           #   源码根解析的, 写相对路径必然找不到文件, 然后整份白名单失效 -> 符号被裁光。
           # ============================================================
-          TRIM_WANT="y"
-          KSYMS_RAW="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/vmlinux_abi_symbollist.raw"
+          # ⚠ 这里只做前置提示: 下面「本轮退回 =n」那一段会重新读
+          #   inputs.trim_unused_ksyms 并据此决定是否写白名单。断言必须跟 input 走,
+          #   不能写死 =y —— 魅族 21 的 device 目录没有 vmlinux_abi_symbollist.raw,
+          #   写死 =y 会让 21 在「配置内核选项」这一步就硬失败(与 trim 实际取 n 矛盾)。
+          #   真正的白名单校验在下文 `if [ "$TRIM_WANT" = "y" ]` 分支里。
+          TRIM_WANT="${{ inputs.trim_unused_ksyms }}"
           echo "TRIM_UNUSED_KSYMS=$TRIM_WANT"
-          echo "KMI 白名单: $KSYMS_RAW"
-          if [ ! -f "$KSYMS_RAW" ]; then
-            echo "::error title=缺少 KMI 白名单::$KSYMS_RAW 不存在。TRIM_UNUSED_KSYMS=y 时必须提供白名单, 否则会把厂商模块依赖的符号全裁掉。"
-            exit 1
+          if [ "$TRIM_WANT" = "y" ]; then
+            KSYMS_RAW="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}/vmlinux_abi_symbollist.raw"
+            echo "KMI 白名单: $KSYMS_RAW"
+            if [ ! -f "$KSYMS_RAW" ]; then
+              echo "::error title=缺少 KMI 白名单::$KSYMS_RAW 不存在。TRIM_UNUSED_KSYMS=y 时必须提供白名单, 否则会把厂商模块依赖的符号全裁掉。"
+              exit 1
+            fi
           fi
           # ============================================================
           # TRIM_UNUSED_KSYMS：本轮退回 =n（run#23 实测结论）
@@ -1442,7 +1491,7 @@ jobs:
           TRIM_WANT="${{ inputs.trim_unused_ksyms }}"
           echo "TRIM_UNUSED_KSYMS = $TRIM_WANT"
           if [ "$TRIM_WANT" = "y" ]; then
-            KSYMS_RAW="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/vmlinux_abi_symbollist.raw"
+            KSYMS_RAW="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}/vmlinux_abi_symbollist.raw"
             if [ ! -f "$KSYMS_RAW" ]; then
               echo "::error title=缺少 KMI 白名单::$KSYMS_RAW 不存在"
               exit 1
@@ -1673,7 +1722,7 @@ jobs:
           [ -d "$COMMON/mm" ] || COMMON="$KERNEL_ROOT"
           echo "内核源码根: $COMMON"
           mkdir -p "$GITHUB_WORKSPACE/build-logs"
-          PATCH="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/patches/01-m2481-ko-krcrc-and-onemind.patch"
+          PATCH="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}/patches/01-m2481-ko-krcrc-and-onemind.patch"
           # kit 补丁是「21 Pro（m2481）专属」的 15 文件 patch：
           #   · onemind 的 DECLARE_HOOK / ko krcrc 都来自 21 Pro 的 kit
           #   · 21 普通版（m2461）目前没有对应 patch，走"跳过"分支
@@ -1990,10 +2039,13 @@ jobs:
           echo "$GOT"
           # 版本串：原厂值以设备事实里的 so.txt / boot_header.txt 为准。
           # ⚠ build.yml 是两机型共享的，不能写死。DEVICE_DIR 由入口工作流传入。
-          DEV_DIR="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}"
+          DEV_DIR="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}"
           WANT=""
           if [ -f "$DEV_DIR/so.txt" ]; then
-            WANT=$(sed -n 's/^kernel_release=//p' "$DEV_DIR/so.txt" | head -1 | tr -d ' \r')
+            # 容错解析：魅族21 写 `kernel_release=...`，
+            # 21 Pro 写 `kernel_release      = ...`（等号两侧有空格）。
+            # 只认无空格的写法会让 21 Pro 静默退回 inputs.version（此前一直如此）。
+            WANT=$(sed -n 's/^kernel_release[[:space:]]*=[[:space:]]*//p' "$DEV_DIR/so.txt" | head -1 | tr -d ' \r')
           fi
           # 兜底：so.txt 缺失或没写 kernel_release 时退回 inputs.version
           if [ -z "${WANT:-}" ]; then
@@ -2013,7 +2065,7 @@ jobs:
         run: |
           set -e
           : "${KERNEL_ROOT:=$GITHUB_WORKSPACE/$CONFIG}"
-          STOCK="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/stock_Module.symvers"
+          STOCK="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}/stock_Module.symvers"
           [ -f "$STOCK" ] || { echo "::error title=缺 KMI 基准::$STOCK 不存在"; exit 1; }
           BUILT=""
           for c in "$KERNEL_ROOT/bazel-bin/common/kernel_aarch64/Module.symvers" \
@@ -2038,7 +2090,7 @@ jobs:
              || grep -q '^CONFIG_TRIM_UNUSED_KSYMS=y' "$DEFCONFIG" 2>/dev/null; then
             MISSING_IN_BIN=$(grep -cvE '^$' /dev/null || true)
             if [ -f "$BUILT" ]; then
-              WL="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/vmlinux_abi_symbollist.raw"
+              WL="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}/vmlinux_abi_symbollist.raw"
               if [ -f "$WL" ]; then
                 # 白名单里有多少符号没出现在编译产物的 Module.symvers 里
                 WL_N=$(grep -c . "$WL" || true)
@@ -2385,7 +2437,7 @@ jobs:
           PART_SIZE=$((96 * 1024 * 1024))          # 原厂 boot 分区 = 100663296
           OUT="boot.img"
 
-          TPL_DIR="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/avb_template"
+          TPL_DIR="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}/avb_template"
           TPL="$TPL_DIR/stock_boot_skeleton.img.zlib"
           TPL_SHA_FILE="$TPL_DIR/stock_boot_skeleton.sha256"
           SOURCE_TXT="$TPL_DIR/source.txt"
@@ -2420,7 +2472,7 @@ jobs:
           # ⚠ 本步骤在 build.yml（两机型共享）里，不能写死 meizu21pro。
           #   期望机型从设备目录名推算：'MEIZU 21pro/device' -> meizu21pro
           #                              '魅族21/device'     -> meizu21
-          TPL_WANT_DEVICE=$(printf '%s' "${DEVICE_DIR:-MEIZU 21pro/device}" | sed 's#/.*$##' \
+          TPL_WANT_DEVICE=$(printf '%s' "${DEVICE_DIR:?device_dir not set}" | sed 's#/.*$##' \
             | tr 'A-Z' 'a-z' | tr -d ' ' | sed 's/^魅族/meizu/')
           echo "  期望机型: $TPL_WANT_DEVICE (由 device_dir 推算)"
           [ "$TPL_DEVICE" = "$TPL_WANT_DEVICE" ] || {
