@@ -363,26 +363,44 @@ def apply_call_sites(p):
                 p.note("  已打: %s (mm_vip_alloc_harder / _stat / tune_watermark_ratio)" % rel)
 
     # --- mm/util.c: kvmalloc_node () -> mm_vip_kvmalloc ---
+    #
+    # ⚠ 与 readahead.c 同类问题（run#5 后代码审查发现）：
+    #   kvmalloc_node() 的函数体开头是两条【声明】：
+    #       gfp_t kmalloc_flags = flags;
+    #       void *ret;
+    #   原实现把 hook（一条【语句】）插在函数体首行，其后紧跟上面两条声明，
+    #   内核带 -Werror -Wdeclaration-after-statement（C90 不允许语句后再声明），
+    #   于是 readahead.c 修好后这里必然接棒编译失败。
+    #   修法：锚定声明区结束（两条声明之后）再插入语句。
     rel = "mm/util.c"
     if os.path.isfile(p.path(rel)):
         src = p.read(rel)
         if "trace_android_vh_mm_vip_kvmalloc" in src:
             p.note("  跳过(已打过): %s (mm_vip_kvmalloc)" % rel)
-        elif True:
-            a = "void *kvmalloc_node(size_t size, gfp_t flags, int node)\n{"
-            if src.count(a) == 1:
+        else:
+            sig = "void *kvmalloc_node(size_t size, gfp_t flags, int node)\n{"
+            decl_end = "\tgfp_t kmalloc_flags = flags;\n\tvoid *ret;\n"
+            if src.count(sig) == 1 and src.count(decl_end) >= 1:
                 block = ("\n\t/* %s: OneMind mz_mm_vip 优化 VIP 线程 kvmalloc 回退策略 */\n"
                          "\ttrace_android_vh_mm_vip_kvmalloc(&flags);\n" % MARK)
-                src = src.replace(a, a + block, 1)
-                if "<trace/hooks/mm.h>" not in src:
-                    a_inc = "#include <linux/mm.h>\n"
-                    if src.count(a_inc) >= 1:
-                        src = src.replace(a_inc, a_inc + "#include <trace/hooks/mm.h>\n", 1)
-                src += "\n/* %s */\n" % (MARK + "_UTIL")
-                p.write(rel, src)
-                p.note("  已打: %s (mm_vip_kvmalloc 调用点)" % rel)
+                # 在函数签名之后的那个 decl_end 处插入（保证是本函数内的声明区末尾）
+                i = src.index(sig)
+                k = src.find(decl_end, i)
+                if k < 0:
+                    p.fail("%s 里 kvmalloc_node 声明区锚点未找到" % rel)
+                else:
+                    ins = k + len(decl_end)
+                    src = src[:ins] + block + src[ins:]
+                    if "<trace/hooks/mm.h>" not in src:
+                        a_inc = "#include <linux/mm.h>\n"
+                        if src.count(a_inc) >= 1:
+                            src = src.replace(a_inc, a_inc + "#include <trace/hooks/mm.h>\n", 1)
+                    src += "\n/* %s */\n" % (MARK + "_UTIL")
+                    p.write(rel, src)
+                    p.note("  已打: %s (mm_vip_kvmalloc 调用点，插在声明区之后)" % rel)
             else:
-                p.fail("%s 里 kvmalloc_node 锚点出现 %d 次" % (rel, src.count(a)))
+                p.fail("%s 里 kvmalloc_node 锚点出现 %d 次（签名 %d / 声明区 %d）"
+                       % (rel, src.count(sig), src.count(sig), src.count(decl_end)))
 
     # --- mm/readahead.c: ondemand_readahead -> ra_tuning_max_page ---
     #
