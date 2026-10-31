@@ -342,14 +342,48 @@ def apply_call_sites(p):
                 p.fail("%s 里 __alloc_pages_slowpath 的 costly allocations 锚点出现 %d 次" % (rel, src.count(a2)))
 
             # (c) __setup_per_zone_wmarks: 水位比
+            #
+            # ⚠ run#7 实测：原实现只插了变量【声明】，没有任何代码使用它们，
+            #   内核带 -Werror 直接报：
+            #       page_alloc.c:8867: unused variable 'low_high_wm_ratio' [-Werror,-Wunused-variable]
+            #       page_alloc.c:8868: unused variable 'mz_min' / 'mz_low' / 'mz_high'
+            #   且 mz_min/mz_low/mz_high 是 kit 里【根本不存在】的发明物。
+            #   按 21 Pro kit patch 原文补全：声明 + 真正使用它的水位计算。
             a3 = ("static void __setup_per_zone_wmarks(void)\n"
-                  "{\n"
-                  "\tunsigned long pages_min = min_free_kbytes >> (PAGE_SHIFT - 10);\n")
+                  "{\n")
             if src.count(a3) == 1:
-                block = ("\tunsigned int low_high_wm_ratio = 1;\n"
-                         "\tunsigned long mz_min = 0, mz_low = 0, mz_high = 0;\n")
-                src = src.replace(a3, a3 + block, 1)
-                changed = True
+                i = src.index(a3)
+                decl_anchor = "\tunsigned long flags;\n"
+                k = src.find(decl_anchor, i)
+                if k < 0:
+                    p.fail("%s 里 __setup_per_zone_wmarks 声明区锚点未找到" % rel)
+                else:
+                    ins = k + len(decl_anchor)
+                    src = (src[:ins]
+                           + "\t/* %s: OneMind mz_watermark_opt 水位比 */\n"
+                             "\tunsigned int low_high_wm_ratio = 1;\n" % MARK
+                           + src[ins:])
+
+                wm_old = ("\t\tzone->_watermark[WMARK_LOW]  = min_wmark_pages(zone) + tmp;\n"
+                          "\t\tzone->_watermark[WMARK_HIGH] = low_wmark_pages(zone) + tmp;\n")
+                if src.count(wm_old) == 1:
+                    wm_new = ("\t\t/* %s: 厂商可调 LOW/HIGH 水位比 */\n"
+                              "\t\ttrace_android_vh_tune_watermark_ratio(&low_high_wm_ratio);\n"
+                              "\t\tif (low_high_wm_ratio != 1) {\n"
+                              "\t\t\tzone->_watermark[WMARK_LOW] = min_wmark_pages(zone) +\n"
+                              "\t\t\t\t(2 * tmp * low_high_wm_ratio) / (low_high_wm_ratio + 1);\n"
+                              "\t\t\tzone->_watermark[WMARK_HIGH] = low_wmark_pages(zone) +\n"
+                              "\t\t\t\t(2 * tmp) / (low_high_wm_ratio + 1);\n"
+                              "\t\t} else {\n"
+                              "\t\t\tzone->_watermark[WMARK_LOW]  = min_wmark_pages(zone) + tmp;\n"
+                              "\t\t\tzone->_watermark[WMARK_HIGH] = low_wmark_pages(zone) + tmp;\n"
+                              "\t\t}\n" % MARK)
+                    src = src.replace(wm_old, wm_new, 1)
+                    changed = True
+                else:
+                    p.fail("%s 里 watermark LOW/HIGH 计算锚点出现 %d 次"
+                           "（tune_watermark_ratio 无处落地 -> unused variable）"
+                           % (rel, src.count(wm_old)))
             else:
                 p.fail("%s 里 __setup_per_zone_wmarks 锚点出现 %d 次" % (rel, src.count(a3)))
 
