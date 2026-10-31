@@ -573,8 +573,14 @@ jobs:
           RUN="${{ github.run_number }}"
           # 一仓库双管理器：release / latest 按 variant 分流（FinaSU 命名保持不变）
           case "${MANAGER_VARIANT:-FinaSU}" in
-            BakaSU) TAG="meizu21pro-bakasu-${RUN}"; LATEST_TAG="meizu21pro-bakasu-latest"; TITLE_MODEL="21Pro GKI BakaSU" ;;
-            *)      TAG="meizu21pro-finatsu-${RUN}"; LATEST_TAG="meizu21pro-latest"; TITLE_MODEL="21Pro GKI" ;;
+            BakaSU)
+              TAG="meizu21pro-bakasu-${RUN}"; LATEST_TAG="meizu21pro-bakasu-latest"; TITLE_MODEL="21Pro GKI BakaSU"
+              SLOT_DESC="Custom 槽 KSU_EXPECTED_SIZE/HASH + CONFIG_KSU_MULTI_MANAGER_SUPPORT=y，官方 KernelSU 管理器同样可用"
+              ;;
+            *)
+              TAG="meizu21pro-finatsu-${RUN}"; LATEST_TAG="meizu21pro-latest"; TITLE_MODEL="21Pro GKI"
+              SLOT_DESC="第二信任槽 KSU_EXPECTED_SIZE2/HASH2"
+              ;;
           esac
           echo "variant=${MANAGER_VARIANT} tag=${TAG} latest=${LATEST_TAG}"
 
@@ -595,7 +601,8 @@ jobs:
           | 内核内嵌证书 size | ${CERT_SIZE:-未知} |
           | 内核内嵌证书 sha256 | \`${CERT_HASH:-未知}\` |
 
-          内核把上面这份 APK 的签名证书编进了第二信任槽。装别的版本会导致
+          内核把上面这份 APK 的签名证书编进了信任槽（${MANAGER_VARIANT} 线：
+          ${SLOT_DESC}）。装别的版本会导致
           管理器识别不到内核（提示"需要更新内核"或无法获取 root）。
 
           <details><summary>本次运行的输入（便于复现）</summary>
