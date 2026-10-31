@@ -585,6 +585,68 @@ def _warn_version(p, msg):
     p.log.append("[WARN] kernel/module/version.c: " + msg)
 
 
+def apply_vendor_hooks(p):
+    """导出 OneMind 8 大 Hook 的 tracepoint 符号（100% KMI 兼容）。
+
+    ⚠ 为什么必须有这一步（run#5 前的代码审查结论）：
+      DECLARE_HOOK 展开为 DECLARE_TRACE，它只【定义】 __tracepoint_/__traceiter_，
+      **不会导出**这两个符号。AOSP 的做法是在 drivers/android/vendor_hooks.c 里
+      对每个 hook 写一行 EXPORT_TRACEPOINT_SYMBOL_GPL()，其展开为：
+          EXPORT_SYMBOL_GPL(__tracepoint_##name);
+          EXPORT_SYMBOL_GPL(__traceiter_##name);
+          EXPORT_STATIC_CALL_GPL(tp_func_##name)
+      （见 AOSP include/linux/tracepoint.h:327）
+
+      21 Pro 的 kit patch 里有这 8 行，所以 21 Pro 门禁 2 能过；
+      魅族21 走「无 kit patch」分支时，apply_kit_onemind.py 原来只写
+      DECLARE_HOOK + 调用点、从不导出 -> 门禁 2 的 16 个符号
+      （8 个 hook × __tracepoint_/__traceiter_）必然缺失。
+      这就是 run#3 那句：
+          [ERROR] Missing Meizu OneMind MM Hook exports: [ 16 个 ]
+      的完整成因之一。缺了这些符号，厂商 .ko 加载时 Unknown symbol -> 卡第一屏。
+
+      已核实：这 16 个符号在【魅族21 自己的原厂 stock_Module.symvers】里 16/16 存在。
+    """
+    rel = "drivers/android/vendor_hooks.c"
+    if not os.path.isfile(p.path(rel)):
+        p.fail("%s 不存在（无法导出 OneMind hook 符号，门禁 2 必然失败）" % rel)
+        return
+
+    src = p.read(rel)
+    if MARK + "_VH_EXPORT" in src:
+        p.note("  跳过(已打过): %s [%s_VH_EXPORT]" % (rel, MARK))
+        return
+
+    hooks = [
+        "android_vh_extfrag_for_order",
+        "android_vh_memcg_filepages_protect",
+        "android_vh_memcg_protect_lru_gen_add_folio",
+        "android_vh_mm_vip_alloc_harder",
+        "android_vh_mm_vip_alloc_harder_stat",
+        "android_vh_mm_vip_kvmalloc",
+        "android_vh_ra_tuning_max_page",
+        "android_vh_tune_watermark_ratio",
+    ]
+
+    # 已经导出过的（21 Pro 走 kit patch 时会先写进去）就不要再写，避免重复定义
+    need = [h for h in hooks
+            if ("EXPORT_TRACEPOINT_SYMBOL_GPL(%s)" % h) not in src]
+    if not need:
+        p.note("  跳过(已导出): %s 里 8 个 hook 均已 EXPORT_TRACEPOINT_SYMBOL_GPL" % rel)
+        return
+
+    block = ["\n/* %s_VH_EXPORT: OneMind 8 大 Hook 的 KMI 兼容导出 */" % MARK]
+    for h in need:
+        block.append("EXPORT_TRACEPOINT_SYMBOL_GPL(%s);" % h)
+    block.append("/* %s_VH_EXPORT */\n" % MARK)
+
+    # 追加到文件末尾即可：vendor_hooks.c 的 EXPORT_* 都是文件作用域语句。
+    src = src.rstrip("\n") + "\n" + "\n".join(block)
+    p.write(rel, src)
+    p.note("  已打: %s (导出 %d 个 OneMind hook: %s)"
+           % (rel, len(need), ", ".join(need)))
+
+
 def apply_version_c(p):
     rel = "kernel/module/version.c"
     path = p.path(rel)
@@ -848,6 +910,7 @@ def main():
     apply_call_sites(p)
     apply_vmscan(p)
     apply_mm_inline(p)
+    apply_vendor_hooks(p)
     apply_version_c(p)
 
     for line in p.log:
