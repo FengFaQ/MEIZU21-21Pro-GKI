@@ -111,7 +111,13 @@ on:
 
 # 同一分支串行，避免两次构建同时写 release / force-push dist 互相覆盖
 concurrency:
-  group: meizu21-${{ github.ref }}
+  # ⚠ group 必须带 ksu_variant：
+  #   FinaSU / BakaSU 是两条独立的编译线，若共用同一 group 会互相排队
+  #   （cancel-in-progress=false 时不取消、只串行），验证时一条线要等另一条
+  #   跑完 30-40 分钟才能开始，效率极低且容易误以为「被对方取消了」。
+  #   带上 variant 后：同一条线内部仍严格串行（行为不变），
+  #   两条线之间互不阻塞。
+  group: meizu21-${{ github.ref }}-${{ inputs.ksu_variant || 'FinaSU' }}
   cancel-in-progress: false
 
 env:
@@ -389,7 +395,12 @@ jobs:
       # use_zram / use_bbg / use_net_enhance / use_rekernel / droidspaces_ntsync
       # 在 build.yml 里是 boolean，传裸 false 是对的。
       use_zram: false
-      use_bbg: false
+      # ★ BBG 基带保护（防格机）：用户要求默认开启。
+      #   上游 vc-teahouse/Baseband-guard，打 CONFIG_BBG=y 并把
+      #   baseband_guard 挂进 LSM 列表，防止基带分区被误写导致变砖。
+      #   build.yml 里该步骤自带「下载失败/安装失败/校验失败」三重兜底，
+      #   失败时打 ::error 阻断构建（skip_incompatible=false 时）。
+      use_bbg: true
       use_net_enhance: false
       use_rekernel: false
       cve_2026_43499_patch: false

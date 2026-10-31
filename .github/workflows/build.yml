@@ -1989,6 +1989,9 @@ jobs:
           PYEOF
 
           # ---- 第 2 层a: git apply（不带 --3way，避免它的静默回退）----
+          # 先记下 patch 涉及的文件，供「部分应用」时精确回滚用
+          PATCH_FILES=$(sed -n 's|^diff --git a/\([^ ]*\) b/.*|\1|p' "$FILTERED" 2>/dev/null | sort -u)
+          echo "patch 涉及 $(printf '%s\n' "$PATCH_FILES" | grep -c . || true) 个文件"
           if git -C "$COMMON" rev-parse --git-dir >/dev/null 2>&1; then
             echo "--- 2a: git apply （失败的部分后面补齐，此处不致命）---"
             git -C "$COMMON" apply --reject "$FILTERED" \
@@ -2032,6 +2035,46 @@ jobs:
           fi
 
           if [ "$KIT_PATCH_COMPLETE" = "0" ]; then
+          # ================================================================
+          # ★ 关键：回滚 patch 已应用的 hunk，让 2b/2c 从干净树开始
+          # ----------------------------------------------------------------
+          # run#20 实测的坑：patch「部分成功、部分被拒」时，
+          #   · vmscan.c 的 hunk 应用成功 -> 插入了 shrink_slab_kcfi_ref
+          #   · mm.h / vendor_hooks.c 的 hunk 被拒 -> 产生 .rej
+          # 门禁因此回退 2b/2c，但 2b 只做幂等跳过（它认自己的标记），
+          # 而 2c 不认 2b 的标记、按自己的锚点又插了一份 ->
+          #     mm/vmscan.c:1057: error: redefinition of 'shrink_slab_kcfi_ref'
+          # 全成功（跳过 2b/2c）和全失败（无残留）都不会触发，唯独「部分成功」会。
+          #
+          # 所以走兜底前，先把 patch 已应用的部分【反向回滚】，
+          # 保证 2b/2c 面对的是与它们生成的补丁一致的干净基线。
+          # ================================================================
+          echo "  回滚 patch 已应用的部分（避免与 2b/2c 重复注入）..."
+          if git -C "$COMMON" rev-parse --git-dir >/dev/null 2>&1; then
+            # git apply -R 在「部分应用」时会失败（已实测），所以改用按文件
+            # git checkout —— patch 涉及的每个文件都恢复到 patch 之前的状态。
+            # 前提：patch 应用前树是干净的（SUSFS 等前置补丁已提交），
+            #       本步骤前面没有任何未提交改动。
+            RB_OK=0
+            RB_FAIL=0
+            while IFS= read -r pf; do
+              [ -n "$pf" ] || continue
+              if git -C "$COMMON" checkout -- "$pf" 2>/dev/null; then
+                RB_OK=$((RB_OK + 1))
+              else
+                RB_FAIL=$((RB_FAIL + 1))
+                echo "::warning title=回滚失败::$pf 无法 checkout 回原状"
+              fi
+            done <<< "$PATCH_FILES"
+            echo "  回滚完成: 成功 $RB_OK 个文件, 失败 $RB_FAIL 个"
+            [ "$RB_FAIL" -eq 0 ] || { echo "::error title=回滚不完整::无法保证 2b/2c 基线干净，拒绝继续"; exit 1; }
+            # 清掉 .rej（git apply --reject 的副产物）
+            while IFS= read -r rj; do
+              [ -n "$rj" ] && rm -f "$rj"
+            done <<< "$(find "$COMMON" -name '*.rej' 2>/dev/null || true)"
+            echo "  回滚后工作区变更文件数: $(git -C "$COMMON" status --porcelain | grep -c . || true)"
+          fi
+
           # ---- 第 2 层b: kit 幂等脚本（容错：单文件失败不中止）----
           # 原版 patch_file 在锚点缺失时 raise 会中止整个脚本，导致
           # vmscan/vmstat 的改动全部丢失。这里包一层，改为逐个容错。

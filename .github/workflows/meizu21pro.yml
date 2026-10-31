@@ -116,7 +116,8 @@ on:
 
 # 同一分支串行，避免两次构建同时写 release / force-push dist 互相覆盖
 concurrency:
-  group: meizu21pro-${{ github.ref }}
+  # 同上：按 ksu_variant 分组，FinaSU / BakaSU 两条线各自排队、互不阻塞
+  group: meizu21pro-${{ github.ref }}-${{ inputs.ksu_variant || 'FinaSU' }}
   cancel-in-progress: false
 
 env:
@@ -394,7 +395,12 @@ jobs:
       # use_zram / use_bbg / use_net_enhance / use_rekernel / droidspaces_ntsync
       # 在 build.yml 里是 boolean，传裸 false 是对的。
       use_zram: false
-      use_bbg: false
+      # ★ BBG 基带保护（防格机）：用户要求默认开启。
+      #   上游 vc-teahouse/Baseband-guard，打 CONFIG_BBG=y 并把
+      #   baseband_guard 挂进 LSM 列表，防止基带分区被误写导致变砖。
+      #   build.yml 里该步骤自带「下载失败/安装失败/校验失败」三重兜底，
+      #   失败时打 ::error 阻断构建（skip_incompatible=false 时）。
+      use_bbg: true
       use_net_enhance: false
       use_rekernel: false
       cve_2026_43499_patch: false
