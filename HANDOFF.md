@@ -449,9 +449,15 @@ release `meizu21-finatsu-11` 与 `meizu21-latest`，`dist-meizu21` 分支已建�
 | 5 个 NEED 符号 | ❌ 缺 | ✅ 已导出 |
 | kCFI | 18/18 MATCH | 18/18 MATCH |
 
-**剩余 6 个缺失符号已逐个 grep 确认「不在 NEED 列表」**，不影响开机：
+**剩余 6 个缺失符号已逐个 grep 确认**（`manifest-hits=0`：在
+`魅族21/device/module_kmi_manifest.txt` 里**既非 NEED 也非 DEF，根本不存在**），
+即它们不是魅族 21 厂商模块要的符号，属白名单台账（stock 基准）的历史遗留，
+**不可也不需补齐**，不影响开机：
 `__tracepoint_/__traceiter_{android_vh_binder_alloc, android_vh_binder_ioctl}`、
 `scsi_execute_cmd_len`、`wait_spam_info`。
+
+> 因此门禁 2 的 `Missing stock symbols` 永远不可能降到 0，**别把"非 0"当故障追**。
+> 判断标准应是：**missing ∩ NEED 必须为空**，而不是 missing == 0。
 
 ### 新增 `scripts/apply_kmi_exports.py`
 
