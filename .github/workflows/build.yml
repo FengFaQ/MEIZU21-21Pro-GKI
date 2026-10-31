@@ -1873,11 +1873,27 @@ jobs:
           [ -d "$COMMON/mm" ] || COMMON="$KERNEL_ROOT"
           echo "内核源码根: $COMMON"
           mkdir -p "$GITHUB_WORKSPACE/build-logs"
-          PATCH="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}/patches/01-m2481-ko-krcrc-and-onemind.patch"
-          # kit 补丁是「21 Pro（m2481）专属」的 15 文件 patch：
-          #   · onemind 的 DECLARE_HOOK / ko krcrc 都来自 21 Pro 的 kit
-          #   · 21 普通版（m2461）没有对应 patch
-          # 以后为 21 也做出 patch 时，把文件名统一留在这里即可自动接上。
+          # kit 补丁按【机型目录里的唯一 patch】解析，不再写死文件名。
+          #
+          # ⚠ 原来写死 01-m2481-ko-krcrc-and-onemind.patch，导致魅族21 的
+          #   01-m2461-kmi-and-onemind.patch 永远匹配不到，切换成 patch 流程
+          #   形同虚设（`[ ! -f "$PATCH" ]` 恒真 -> 一直走脚本注入分支）。
+          #   现在改为 glob，两个机型各自命中自己的 patch。
+          #   若同一目录出现多个匹配，硬失败（宁可停下，也不要随机选一个）。
+          PATCH_DIR="$GITHUB_WORKSPACE/${DEVICE_DIR:?device_dir not set}/patches"
+          PATCH=""
+          if [ -d "$PATCH_DIR" ]; then
+            PATCH_HITS=$(find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' | sort)
+            PATCH_N=$(printf '%s\n' "$PATCH_HITS" | grep -c . || true)
+            if [ "${PATCH_N:-0}" -gt 1 ]; then
+              echo "::error title=kit 补丁不唯一::$PATCH_DIR 下有 ${PATCH_N} 个 .patch，无法确定用哪一个"
+              printf '%s\n' "$PATCH_HITS" | sed 's/^/    /'
+              exit 1
+            elif [ "${PATCH_N:-0}" -eq 1 ]; then
+              PATCH="$PATCH_HITS"
+            fi
+          fi
+          echo "kit 补丁: ${PATCH:-<无>}"
           if [ ! -f "$PATCH" ]; then
             echo "::warning title=跳过 kit 补丁::缺 $PATCH（该机型没有专属 patch）"
             # ---------------------------------------------------------------
