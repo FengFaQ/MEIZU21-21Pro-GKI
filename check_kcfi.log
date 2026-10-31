@@ -1,0 +1,23 @@
+=== 1. Direct Function Preamble kCFI Audit ===
+shrink_slab                  type=t addr=0xffffffc0082cb510 actual=0xc3b4beac kcfi_sym=None       expected=0xc3b4beac -> MATCH
+do_shrink_slab               type=t addr=0xffffffc0082d3afc actual=0xd65f03c0 kcfi_sym=None       expected=N/A        -> MATCH
+setup_per_zone_wmarks        type=T addr=0xffffffc00832fe94 actual=0xa540670c kcfi_sym=None       expected=0xa540670c -> MATCH
+clk_set_duty_cycle           type=T addr=0xffffffc0087c9804 actual=0x07c4f73f kcfi_sym=None       expected=N/A        -> MATCH
+__brelse                     type=T addr=0xffffffc0083ede18 actual=0xa3e5bffb kcfi_sym=None       expected=N/A        -> MATCH
+end_buffer_write_sync        type=T addr=0xffffffc0083ec3b0 actual=0xd2948eb7 kcfi_sym=0xd2948eb7 expected=0xd2948eb7 -> MATCH
+find_lock_task_mm            type=T addr=0xffffffc0082b9b0c actual=0xea4a421a kcfi_sym=None       expected=0xea4a421a -> MATCH
+sched_show_task              type=T addr=0xffffffc0080f9934 actual=0x1703dde1 kcfi_sym=None       expected=0x1703dde1 -> MATCH
+android_debug_symbol         type=T addr=0xffffffc008c39e24 actual=0x0ec970ab kcfi_sym=None       expected=0x0ec970ab -> MATCH
+kallsyms_lookup_name         type=T addr=0xffffffc0081a46c8 actual=0xaa7e236f kcfi_sym=None       expected=0xaa7e236f -> MATCH
+
+=== 2. Meizu OneMind MM Vendor Hook Traceiter Call-Site kCFI Audit ===
+__traceiter_android_vh_extfrag_for_order                callsite_kcfi=0x55ddc73d expected=0x55ddc73d -> MATCH
+__traceiter_android_vh_tune_watermark_ratio             callsite_kcfi=0xd25b6965 expected=0xd25b6965 -> MATCH
+__traceiter_android_vh_mm_vip_alloc_harder              callsite_kcfi=0xfab75373 expected=0xfab75373 -> MATCH
+__traceiter_android_vh_mm_vip_kvmalloc                  callsite_kcfi=0xd25b6965 expected=0xd25b6965 -> MATCH
+__traceiter_android_vh_mm_vip_alloc_harder_stat         callsite_kcfi=0x82360994 expected=0x82360994 -> MATCH
+__traceiter_android_vh_ra_tuning_max_page               callsite_kcfi=0x4f5f504f expected=0x4f5f504f -> MATCH
+__traceiter_android_vh_memcg_filepages_protect          callsite_kcfi=0xcacb6617 expected=0xcacb6617 -> MATCH
+__traceiter_android_vh_memcg_protect_lru_gen_add_folio  callsite_kcfi=0xb2bf7b95 expected=0xb2bf7b95 -> MATCH
+
+[ALL kCFI CHECKS PASSED 100%!]

@@ -1,0 +1,15 @@
+template=/home/runner/work/MEIZU21-21Pro-GKI/MEIZU21-21Pro-GKI/魅族21/device/avb_template/stock_boot_skeleton.img.zlib
+template_desc=zlib(100142 -> 100663296 字节)
+output=boot.img
+output_size=100663296
+kernel_size=34961920
+header_version=4
+header_size=1584
+os_version=0x1c00017a
+payload_end=0x2159000
+stock_vbmeta_offset=0x2054000
+stock_vbmeta_size=2496
+stock_original_image_size=0x2054000
+new_magic_at_payload_end=AVB0
+avbf_at_eof_minus_64=AVBf
+sha256=55930a4e8eac25d53c678fa174b3fe1e30dee8678399528444f50493cb65402e
