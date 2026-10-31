@@ -1,0 +1,7 @@
+=== KMI & krcrc Symbol Audit ===
+Stock exported symbols : 6501
+Built exported symbols : 15037
+Missing stock symbols  : 0
+Raw CRC matches        : 6329 / 6501
+[WARN] Could not locate struct kernel_symbol for 'module_layout' in Image.
+[ALL KMI & MEIZU ONEMIND HOOK EXPORTS VERIFIED 100%!]

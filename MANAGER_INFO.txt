@@ -1,0 +1,5 @@
+manager_apk=FinaSU_v1.3.2_33090-release.apk
+manager_apk_sha256=367e28a646d4f448218ea1fa5d1228fcdd5fb20623c5e22eecb3ea3462fb19e1
+manager_cert_size=0x02cc
+manager_cert_hash=2d89b50aaf1db013c2b6738f973f48b62ea21a3a8d7216bfec3521065d448458
+finasu_tag=v1.3.2
