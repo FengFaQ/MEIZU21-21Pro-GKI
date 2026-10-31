@@ -108,6 +108,11 @@ on:
         required: true
         type: boolean
         default: true
+      use_bbg:
+        description: 'BBG 基带保护（防格机）。排查无限重启时可关掉做对照'
+        required: false
+        type: boolean
+        default: true
 
 # 同一分支串行，避免两次构建同时写 release / force-push dist 互相覆盖
 concurrency:
@@ -400,7 +405,7 @@ jobs:
       #   baseband_guard 挂进 LSM 列表，防止基带分区被误写导致变砖。
       #   build.yml 里该步骤自带「下载失败/安装失败/校验失败」三重兜底，
       #   失败时打 ::error 阻断构建（skip_incompatible=false 时）。
-      use_bbg: true
+      use_bbg: ${{ inputs.use_bbg }}
       use_net_enhance: true
       use_rekernel: false
       cve_2026_43499_patch: false
