@@ -98,24 +98,45 @@ class P(object):
 
 
 def apply_vendor_hooks(p):
-    """两个 NEEDED 的 vendor hook tracepoint：smartzram + kswapd_wake。
+    """两个 NEEDED 的 vendor hook 符号，**性质不同，必须分开处理**。
 
-    kit patch 用 MZ_DEFINE_VH 宏直接造出 tracepoint 结构体 + 空 traceiter。
-    这里沿用同样做法：这两个 hook 厂商侧只要求符号存在（不要求内核真跑回调），
-    与 OneMind 那 8 个"必须真触发"的 hook 性质不同，不能用同一套处理。
+    (1) android_vh_smartzram_tune_swappiness
+        AOSP 上游【没有】这个 hook（已核对 include/trace/hooks/ 下无此名字），
+        是魅族自己加的，所以必须像 21 Pro kit 那样用 MZ_DEFINE_VH 直接造出
+        tracepoint 结构体 + 空 traceiter（厂商侧只要求符号存在）。
+        stock CRC: __tracepoint=0x1523d65f / __traceiter=0xb2b09362
+
+    (2) mm_vmscan_kswapd_wake
+        ⚠ 这是 AOSP 上游【已有】的真实 TRACE_EVENT
+        （include/trace/events/vmscan.h:66，
+          TRACE_EVENT(mm_vmscan_kswapd_wake, TP_PROTO(int nid, int zid, int order), ...)）。
+        所以【只能】用 EXPORT_TRACEPOINT_SYMBOL_GPL 导出它，绝不能 MZ_DEFINE_VH：
+          · tracepoint.h 已声明 __traceiter_mm_vmscan_kswapd_wake(void*, int, int, int)，
+            再定义 int __traceiter_...(void*) -> conflicting types -> 编译失败
+          · 即便编过，空实现与真实 TRACE_EVENT 的原型不同，CRC 也对不上
+        21 Pro kit patch 第 679 行用的就是 EXPORT_TRACEPOINT_SYMBOL_GPL。
     """
     rel = "drivers/android/vendor_hooks.c"
     block = """
-/* %(m)s: 魅族21 厂商模块 NEED 的两个 vendor hook 符号
- * （m2461 没有 m2481 kit patch，靠这里补齐；用法与 kit 的 MZ_DEFINE_VH 一致） */
+/* %(m)s: 魅族21 厂商模块 NEED 的 vendor hook 符号
+ *
+ * 分两类处理（区别很重要，别混用）：
+ *   · android_vh_smartzram_tune_swappiness —— AOSP 无此 hook，需自造符号
+ *   · mm_vmscan_kswapd_wake               —— AOSP 已有真实 TRACE_EVENT，
+ *                                            只能导出，不能再定义 traceiter
+ *                                            （否则 conflicting types 编译失败）
+ */
 #define %(m)s_DEFINE_VH(name) \\
-\tstruct tracepoint __tracepoint_##name; \\
-\tEXPORT_SYMBOL_GPL(__tracepoint_##name); \\
-\tint __traceiter_##name(void *__data) { return 0; } \\
-\tEXPORT_SYMBOL_GPL(__traceiter_##name);
+	struct tracepoint __tracepoint_##name; \\
+	EXPORT_SYMBOL_GPL(__tracepoint_##name); \\
+	int __traceiter_##name(void *__data) { return 0; } \\
+	EXPORT_SYMBOL_GPL(__traceiter_##name);
 
 %(m)s_DEFINE_VH(android_vh_smartzram_tune_swappiness)
-%(m)s_DEFINE_VH(mm_vmscan_kswapd_wake)
+
+/* mm_vmscan_kswapd_wake 由 include/trace/events/vmscan.h 的 TRACE_EVENT 定义，
+ * 这里只把它导出（与 21 Pro kit patch 的写法一致） */
+EXPORT_TRACEPOINT_SYMBOL_GPL(mm_vmscan_kswapd_wake);
 """ % {"m": MARK}
     p.append_block(rel, block, "%s_DEFINE_VH" % MARK)
 
