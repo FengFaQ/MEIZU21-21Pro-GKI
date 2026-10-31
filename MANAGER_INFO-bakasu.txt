@@ -1,0 +1,7 @@
+manager_variant=BakaSU
+manager_apk=bakasu-ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk
+manager_apk_sha256=25657bc449439687608fffa04b4b586de90fc405e3dc6217bd997fc71ba0a0a1
+manager_cert_size=0x0377
+manager_cert_hash=d3469712b6214462764a1d8d3e5cbe1d6819a0b629791b9f4101867821f1df64
+bakasu_tag=v4.2.0-rc3
+manager_cert_slot=custom(KSU_EXPECTED_SIZE/HASH) + CONFIG_KSU_MULTI_MANAGER_SUPPORT=y
