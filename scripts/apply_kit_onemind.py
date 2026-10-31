@@ -133,7 +133,7 @@ MM_H_BLOCK = """
  * 因为 TP_PROTO 的形参类型参与 __traceiter_* 的 kCFI Type Hash 计算。
  * 来源: m2481kit/patches/01-m2481-ko-krcrc-and-onemind.patch
  */
-#ifndef %(mark)s_MM_H
+#if !defined(%(mark)s_MM_H) || defined(TRACE_HEADER_MULTI_READ)
 #define %(mark)s_MM_H
 struct readahead_control;
 DECLARE_HOOK(android_vh_extfrag_for_order,
@@ -165,7 +165,7 @@ VMSCAN_H_ANCHOR = "#endif /* _TRACE_HOOK_VMSCAN_H */"
 
 VMSCAN_H_BLOCK = """
 /* %(mark)s: OneMind 8 大 Hook(MGLRU 部分), 签名与原厂一致 */
-#ifndef %(mark)s_VMSCAN_H
+#if !defined(%(mark)s_VMSCAN_H) || defined(TRACE_HEADER_MULTI_READ)
 #define %(mark)s_VMSCAN_H
 struct lruvec;
 struct lru_gen_folio;
@@ -222,6 +222,27 @@ def _ensure_hooks(p, rel, anchor, block, tag):
         p.fail("%s 不存在" % rel)
         return
     src = p.read(rel)
+
+    # ---------------------------------------------------------------
+    # ★ 守卫修正（必须在"是否已声明"判断之前做）
+    # ---------------------------------------------------------------
+    # run#8 实测：把 DECLARE_HOOK 整块插在 #endif /* _TRACE_HOOK_MM_H */ 之前
+    # 是【对的】，但块自身若用 `#ifndef MZ_KIT_P4_MM_H` 保护，就会挡住
+    # <trace/define_trace.h> 触发的【第二次包含】(TRACE_HEADER_MULTI_READ)：
+    #   · 第一次包含：MZ_KIT_P4_MM_H 未定义 -> 展开（只有声明）
+    #   · 第二次包含：MZ_KIT_P4_MM_H 已定义 -> 被 #ifndef 挡掉
+    #     -> DEFINE_TRACE / __tracepoint_* / __traceiter_* 从未生成
+    #   -> vmlinux 链接报 20 个 undefined symbol（__tracepoint_*/__traceiter_*/__SCK__tp_func_*）
+    # 上游头文件自己的守卫就是这种"镜像 TRACE_HEADER_MULTI_READ"写法，必须一致。
+    # 这里做就地修正，使【已经插错过】的树也能被自动救回来。
+    # ---------------------------------------------------------------
+    old_guard = "#ifndef %s_%s\n#define %s_%s\n" % (MARK, tag, MARK, tag)
+    new_guard = ("#if !defined(%s_%s) || defined(TRACE_HEADER_MULTI_READ)\n"
+                 "#define %s_%s\n" % (MARK, tag, MARK, tag))
+    if old_guard in src:
+        src = src.replace(old_guard, new_guard, 1)
+        p.write(rel, src)
+        p.note("  已修: %s (守卫改为镜像 TRACE_HEADER_MULTI_READ，否则 DEFINE_TRACE 不生成)" % rel)
 
     declared = [n for n in names
                 if _re.search(r"DECLARE_HOOK\(\s*%s\s*," % _re.escape(n), src)]
