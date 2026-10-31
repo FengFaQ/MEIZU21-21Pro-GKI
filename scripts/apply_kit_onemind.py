@@ -654,9 +654,17 @@ def apply_vmscan(p):
 # 5) include/linux/mm_inline.h —— lru_gen_add_folio 的 MGLRU hook
 # ======================================================================
 def apply_mm_inline(p):
-    """只【校验】kit patch 是否已正确插入 lru_gen hook，绝不自己插入。
+    """确保 memcg_protect_lru_gen_add_folio 的声明与调用点存在（缺失则补全）。
 
-    ## 为什么改成"只校验不插入"（run#22 实测教训）
+    ## 当前行为（2026-10-31 起）
+    该 hook 在 21 Pro 由 kit patch 插入；魅族 21 没有 kit patch，本函数会
+    **自己补全**三段：mm_inline.h 的前置声明、mm_inline.h 的调用点、
+    mm/vmscan.c 的函数定义。三者缺一不可（缺定义会链接期 undefined）。
+    已存在时走「跳过」，幂等。
+
+    以下历史教训仍然适用（说明为什么插入位置必须精确）：
+
+    ## 历史教训：为什么插入位置必须精确（run#22 实测）
     原实现往 `lru_gen_add_folio()` 的 if/else 链中间插：
         if (folio_test_active(folio))
             mz_seq = seq;                                          <- 插在这

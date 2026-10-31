@@ -1995,6 +1995,27 @@ jobs:
             echo "  $COMMON 不是 git 仓库，跳过 git apply"
           fi
 
+          # ================================================================
+          # ★ 一仓库双机型/双管理器：patch 已完整覆盖时，跳过 2b/2c
+          # ----------------------------------------------------------------
+          # 21 Pro 的 kit patch 只覆盖部分改动（OneMind 的调用点要靠 2b/2c 补），
+          # 所以它必须继续跑下面两层。
+          # 但魅族 21 的 01-m2461-*.patch 是**从脚本注入结果反向生成**的完整补丁，
+          # 与 2b/2c 内容重叠；再跑一遍会重复定义（实测 wakeup.c 重复
+          # EXPORT_SYMBOL_GPL、memcontrol.c 重复定义 mem_cgroup_id_put2、
+          # vmscan.c 重复 shrink_slab_kcfi_ref / shrink_* 导出），直接编译失败。
+          # 因此：patch 应用【零 .rej】时视为完整，跳过 2b/2c；
+          #       有 .rej（说明 patch 与源码树漂移）才回退到脚本兜底。
+          # ================================================================
+          KIT_PATCH_COMPLETE=0
+          if [ "${REJ_LIST:-}" = "" ] && [ -f "$FILTERED" ]; then
+            KIT_PATCH_COMPLETE=1
+            echo "  patch 应用无 .rej -> 视为完整补丁，跳过 2b/2c 脚本注入（避免重复定义）"
+          else
+            echo "  存在 .rej 或 patch 未生效 -> 继续用 2b/2c 脚本兜底"
+          fi
+
+          if [ "$KIT_PATCH_COMPLETE" = "0" ]; then
           # ---- 第 2 层b: kit 幂等脚本（容错：单文件失败不中止）----
           # 原版 patch_file 在锚点缺失时 raise 会中止整个脚本，导致
           # vmscan/vmstat 的改动全部丢失。这里包一层，改为逐个容错。
@@ -2090,6 +2111,8 @@ jobs:
             | tee -a "$GITHUB_WORKSPACE/build-logs/kit_onemind.log"
           test "${PIPESTATUS[0]}" -eq 0 || {
             echo "::error title=OneMind/kCFI 签名校验失败::见 build-logs/kit_onemind.log"; exit 1; }
+
+          fi   # KIT_PATCH_COMPLETE == 0 -> 2b/2c 兜底结束
 
           git -C "$COMMON" diff --stat 2>/dev/null | tail -20 || true
 

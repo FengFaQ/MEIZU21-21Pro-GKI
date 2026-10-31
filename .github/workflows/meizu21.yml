@@ -1,4 +1,7 @@
-name: 魅族 21 内核构建 (FinaSU + SUSFS, android14-6.1.25)
+name: 魅族 21 内核构建
+# 一仓库双管理器：workflow 名保持稳定（不带变体），实际变体由 run-name 体现，
+# 否则 BakaSU 的 run 在 Actions 列表里也会显示成 FinaSU，容易误判。
+run-name: 魅族 21 内核构建 · ${{ inputs.ksu_variant || 'FinaSU' }} · android14-6.1.25
 
 # ============================================================================
 # 目标机型: 魅族 21 (M2461 / SM8650 Pineapple)

@@ -1,4 +1,6 @@
-name: 21 Pro 内核构建 (FinaSU + SUSFS, android14-6.1.25)
+name: 21 Pro 内核构建
+# 一仓库双管理器：workflow 名保持稳定（不带变体），实际变体由 run-name 体现。
+run-name: 21 Pro 内核构建 · ${{ inputs.ksu_variant || 'FinaSU' }} · android14-6.1.25
 
 # ============================================================================
 # 目标机型: 魅族 21 Pro (M2481 / SM8650 Pineapple)
