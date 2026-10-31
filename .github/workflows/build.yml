@@ -156,6 +156,11 @@ jobs:
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
       SKIP_INCOMPATIBLE: ${{ inputs.skip_incompatible }}
+      # ★ 必须在 job 级声明：workflow_call 的 inputs 只会进 `inputs` 上下文，
+      #   不会自动变成环境变量；step 级 env 又不跨 step 继承。
+      #   少这一行，所有 `${DEVICE_DIR:?device_dir not set}` 都会在赋值瞬间中止
+      #   （run#1 就是这么挂的：line 7: DEVICE_DIR: device_dir not set）。
+      DEVICE_DIR: ${{ inputs.device_dir }}
 
     steps:
       - name: 构建信息摘要
