@@ -31,8 +31,8 @@ LTO = none
 |---|---|---|
 | 设备事实 `device/` | ✅ 齐全（13 个文件） | ✅ 齐全（13 个文件） |
 | AVB 骨架等价性 | ✅ `repack(原厂Image) == 原厂 boot.img`，diff = 0 | ✅ 同左，diff = 0 |
-| 工作流 | ✅ 已跑通 **run#24 全绿** | ⏳ **首跑进行中，已推进 8 轮（run#8）** |
-| release 产物 | ✅ `meizu21pro-finatsu-24` / `meizu21pro-latest` | — |
+| 工作流 | ✅ 已跑通 **run#24 全绿** | ✅ **run#11 全绿**（三道门禁全过，产物已发布） |
+| release 产物 | ✅ `meizu21pro-finatsu-24` / `meizu21pro-latest` | ✅ `meizu21-finatsu-11` / `meizu21-latest` |
 | 真机刷入验证 | ❌ **未做** | ❌ 未做 |
 | 管理器 APK 绑定 | ✅ FinaSU `v1.3.2`（cert `0x02cc`） | ✅ 复用同一套 CI 逻辑 |
 
@@ -382,3 +382,53 @@ kit patch 里有个宏：
 比直接报错危险得多。21 Pro 只对 `binder_alloc` / `binder_ioctl` /
 `smartzram_tune_swappiness` 这 3 个「只需符号存在」的 hook 用它。
 **8 个 OneMind hook 绝对不能用它。**
+
+---
+
+## 13. run#11 全绿 —— 魅族 21 首个可用内核产物（2026-10-31）
+
+**commit `b7e1a68`，run 41173076472，三个 job 全部 success。**
+
+### 三门禁实测数据（全部首次拿到）
+
+| 门禁 | 结果 | 关键输出 |
+|---|---|---|
+| 1/3 版本串 | ✅ 通过 | `Linux version 6.1.25-android14-11-maybe-dirty ... clang 17.0.2` |
+| 2/3 KMI+CRC | ✅ 通过 | `Stock 6501 / Built 15020 / Missing 16 / Raw CRC 6325 / 6501`，`ALL KMI & MEIZU ONEMIND HOOK EXPORTS VERIFIED 100%` |
+| 3/3 kCFI | ✅ **100% MATCH** | `[ALL kCFI CHECKS PASSED 100%!]`，`cfi_unverified.txt` 为空 |
+
+**16 个 OneMind hook 全部补齐**：缺失数从 run#3 的 32 降到 16，且剩余的 16 个
+**不含任何 OneMind hook**，全是别的符号：
+`__tracepoint_/__traceiter_{binder_alloc, binder_ioctl, smartzram_tune_swappiness,
+mm_vmscan_kswapd_wake}`（8 个）+ `mem_cgroup_id_put2, pm_system_irq_wakeup,
+reclaim_pages, scsi_execute_cmd_len, shrink_active_list, shrink_inactive_list,
+shrink_list, wait_spam_info`（8 个）。
+
+> 这 16 个**不是 OneMind 的**，门禁只 WARN 不阻断。它们分别对应 kit patch 里
+> `MZ_DEFINE_VH(...)` 那 3 个 hook（binder_alloc / binder_ioctl / smartzram）与
+> `mm_vmscan_kswapd_wake`，以及若干 m2481 专属导出（`wait_spam_info`、
+> `pm_system_irq_wakeup` 等）。**若真机出现 Unknown symbol，先查这 16 个。**
+> 需要时可用环境变量/严格模式把它们纳入阻断。
+
+### 产物
+
+release `meizu21-finatsu-11` 与 `meizu21-latest`，`dist-meizu21` 分支已建立：
+
+| 文件 | 大小 |
+|---|---|
+| `android14-6.1.25-2023-10-boot.img` | 100,663,296 |
+| `android14-6.1.25-2023-10-AnyKernel3.zip` | 17,516,450 |
+| `FinaSU_v1.3.2_33090-release.apk` | 28,129,308 |
+| `boot_avb_report.txt` / `check_kcfi.log` / `krcrc_audit.log` / `kit_onemind.log` / `MANAGER_INFO.txt` | — |
+
+`boot.img` 结构自检：`BOOT IMG CHECK PASSED (AVB0 + AVBf 就位, 与原厂可启动结构一致)`，
+`kernel_size=34961920`，`payload_end=0x2159000`，模板来自 `魅族21/device/avb_template`。
+
+### 为什么前面 10 轮全挂（一句话总结）
+
+`apply_kit_onemind.py` 在 21 Pro 上**从未执行过**（kit patch 让它永远走「已打过」分支），
+是彻头彻尾的死代码。魅族 21 首跑才逐层暴露：锚点写法（#4）→ 插入位置（#5）→
+函数边界（#6）→ 只声明不引用（#7）→ tracepoint 守卫挡住 MULTI_READ 第二遍（#8/#9/#10）。
+
+**下一件事**：拿 `boot.img` 跑 `/mnt/c/Step/work/gki-pro/FLASH_SOP.md` §1.4 的 `audit_boot.py`，
+全 OK 后**只刷非活动槽**验证开机、Root、管理器识别、SUSFS。
