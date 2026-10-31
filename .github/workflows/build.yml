@@ -633,12 +633,29 @@ jobs:
               fi
               bash "$GITHUB_WORKSPACE/scripts/ksu_post_setup.sh" KernelSU sukisu
               ;;
+            # ============================================================
+            # BakaSU —— 与 FinaSU 完全同构的第二条编译线（一仓库双管理器）
+            # ------------------------------------------------------------
+            # 上游 Baka-SU/BakaSU 是 ReSukiSU 的 fork，且**没有** FinaSU 的
+            # KSU_EXPECTED_SIZE2 / KSU_EXPECTED_HASH2 / SECOND_SIGNATURE_RELEASE
+            # 第二信任槽机制（main 5785bdb8 的 kernel/Kbuild 只有
+            # `ifdef KSU_EXPECTED_SIZE` / `ifdef KSU_EXPECTED_HASH`）。它靠
+            # CONFIG_KSU_MULTI_MANAGER_SUPPORT 把「官方槽 + Custom 槽」一起编进
+            # apk_sign_keys[]（main kernel/manager/apk_sign.c），因此这里的等效实现是：
+            #   · 第一槽 KSU_EXPECTED_SIZE / KSU_EXPECTED_HASH = 官方管理器证书
+            #   · CONFIG_KSU_MULTI_MANAGER_SUPPORT=y 让 Custom 槽同时生效
+            #     （BakaSU 管理器 + 上游 KernelSU 管理器都认）
+            # 不能照抄 FinaSU 的 awk：写进去的变量没人读，会静默失效。
+            #
+            # 另注：上游 kernel/setup.sh 克隆的是 ReSukiSU/ReSukiSU（不是 BakaSU），
+            # 且会 stash/pull 覆盖钉住的版本，所以这里手工完成 in-tree 集成。
             "BakaSU")
-              echo "添加 BakaSU..."
-              curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash $BRANCH
-              # 内核侧 KernelSU 检出到官方最新上传 Manager 构建的同一提交
-              #（Kbuild 以 30700 + git 提交数 计算版本，与官方管理器 versionCode 同源同值），
-              # 保证内核 KSU 版本与拉取的管理器安装包严格一致
+              echo "添加 ${{ inputs.ksu_variant }}..."
+              git clone https://github.com/Baka-SU/BakaSU.git KernelSU
+              # ★ 必须完整 clone（不能 --depth 1）：上游 kernel/Kbuild 用
+              #   `rev-list --count HEAD` 算版本（KSU_VERSION = 30000 + count + 700），
+              #   浅克隆会少算提交数 -> 管理器 versionCode 错位 -> 报"需要更新内核"。
+              # 检出到与发布 APK 同源的提交（ksu_commit 由 get-manager 解析 tag 得到）
               if [ -n "$KSU_COMMIT" ]; then
                 if ! git -C KernelSU checkout --detach "$KSU_COMMIT" 2>/dev/null; then
                   git -C KernelSU fetch origin "$KSU_COMMIT"
@@ -648,13 +665,96 @@ jobs:
                   echo "::error::KernelSU 检出官方构建提交 $KSU_COMMIT 失败，无法对齐管理器版本"
                   exit 1
                 fi
-                echo "KernelSU 已检出到官方上传构建提交 $KSU_COMMIT (KSU 版本 $((30700 + $(git -C KernelSU rev-list --count HEAD))))"
+                echo "KernelSU 已检出到官方上传构建提交 $KSU_COMMIT (KSU 版本 $((30000 + $(git -C KernelSU rev-list --count HEAD) + 700)))"
               fi
+              # 与 FinaSU 分支同构的手工 in-tree 集成：软链驱动目录并挂载
+              # Makefile / Kconfig（等价于上游 setup.sh 的 setup_kernelsu 段，
+              # 但不做 stash/pull/checkout，钉住的版本不会被改动）
+              DRIVER_DIR="$KERNEL_ROOT/common/drivers"
+              ln -sfn "$(realpath --relative-to="$DRIVER_DIR" "$KERNEL_ROOT/KernelSU/kernel")" "$DRIVER_DIR/kernelsu"
+              grep -q "obj-.*CONFIG_KSU.*kernelsu/" "$DRIVER_DIR/Makefile" || \
+                echo 'obj-$(CONFIG_KSU) += kernelsu/' >> "$DRIVER_DIR/Makefile"
+              if ! grep -q 'source "drivers/kernelsu/Kconfig"' "$DRIVER_DIR/Kconfig"; then
+                sed -i "/endmenu/i source \"drivers/kernelsu/Kconfig\"" "$DRIVER_DIR/Kconfig"
+              fi
+
+              # 锚点断言：上游结构一旦漂移（换回 ReSukiSU 谱系 / 自带第二槽），
+              # 立即失败而不是静默产出一个认不到管理器的内核
+              BAKA_KBUILD="KernelSU/kernel/Kbuild"
+              [ -f "$BAKA_KBUILD" ] || { echo "::error::上游 BakaSU 缺少 kernel/Kbuild"; exit 1; }
+              ANCHOR_HITS=$(grep -c '^# Custom Signs$' "$BAKA_KBUILD" || true)
+              if [ "$ANCHOR_HITS" != "1" ]; then
+                echo "::error::Kbuild 锚点 '# Custom Signs' 命中 $ANCHOR_HITS 次（期望 1），上游 Kbuild 结构可能已变化"
+                grep -n 'Custom Signs\|KSU_EXPECTED' "$BAKA_KBUILD" || true
+                exit 1
+              fi
+              for K in '^ifdef KSU_EXPECTED_SIZE$' '^ifdef KSU_EXPECTED_HASH$'; do
+                HITS=$(grep -cE "$K" "$BAKA_KBUILD" || true)
+                [ "$HITS" = "1" ] || { echo "::error::Kbuild 缺少唯一锚点 $K（命中 $HITS 次），上游结构可能已变化"; exit 1; }
+              done
+              if grep -q 'KSU_EXPECTED_SIZE2\|KSU_EXPECTED_HASH2\|SECOND_SIGNATURE_RELEASE' "$BAKA_KBUILD"; then
+                echo "::error::上游 BakaSU 已自带第二信任槽机制，本分支的注入方式需重新适配（勿静默继续）"
+                exit 1
+              fi
+
+              # 证书：优先使用 get-manager 传入的官方 APK 证书；
+              # 未传入时回退到钉住 tag 的 release APK 提取（与 FinaSU 同策略）
+              if [ -z "$KSU_CERT_SIZE" ] || [ -z "$KSU_CERT_HASH" ]; then
+                echo "管理器证书未由 get-manager 传入，回退到 BakaSU 指定 Release APK 提取..."
+                REL_APK_DIR=$(mktemp -d)
+                REL_URL=$(printf '%s' "${BAKASU_RELEASE_URL:-}" | head -n1)
+                if [ -z "$REL_URL" ]; then
+                  echo "::error::未提供 BakaSU Release APK 下载地址（get-manager 未传入且 BAKASU_RELEASE_URL 为空），BakaSU 管理器将无法被内核识别"
+                  exit 1
+                fi
+                curl -sL --fail --retry 3 --max-time 300 -o "$REL_APK_DIR/manager.apk" "$REL_URL" || {
+                  echo "::error::下载 BakaSU Release APK 失败，无法提取管理器签名证书"
+                  exit 1
+                }
+                CERT_INFO=$(python3 "$GITHUB_WORKSPACE/scripts/finasu_compat/extract_manager_cert.py" "$REL_APK_DIR/manager.apk" | head -n1)
+                KSU_CERT_SIZE=$(echo "$CERT_INFO" | awk '{print $1}')
+                KSU_CERT_HASH=$(echo "$CERT_INFO" | awk '{print $2}')
+              fi
+              if [ -z "$KSU_CERT_SIZE" ] || [ -z "$KSU_CERT_HASH" ]; then
+                echo "::error::BakaSU 管理器签名证书提取失败，BakaSU 管理器将无法被内核识别"
+                exit 1
+              fi
+              echo "注入 BakaSU 管理器签名证书到第一信任槽(Custom): size=$KSU_CERT_SIZE sha256=$KSU_CERT_HASH"
+              # ★ 注入位置必须**严格在**两个 ifdef 块之前：
+              #   本地用上游 main 的 Kbuild 实测，写在 ifdef 之后（例如紧贴
+              #   `ifdef KSU_EXPECTED_HASH` 上方）时 KSU_EXPECTED_SIZE 不会进入
+              #   ccflags-y（size 槽静默失效，只剩 hash 槽生效）。故锚点取上方
+              #   唯一的 `# Custom Signs` 注释行，并断言"注入块在前、两个 ifdef 在后"。
+              awk -v size="$KSU_CERT_SIZE" -v hash="$KSU_CERT_HASH" '
+                !done && /^# Custom Signs$/ {
+                  print
+                  print "# injected by GKI_BakaSU_SUSFS: trust the official BakaSU manager via the Custom slot"
+                  print "KSU_EXPECTED_SIZE := " size
+                  print "KSU_EXPECTED_HASH := " hash
+                  print ""
+                  done = 1
+                  next
+                }
+                { print }
+              ' "$BAKA_KBUILD" > "$BAKA_KBUILD.new" && mv "$BAKA_KBUILD.new" "$BAKA_KBUILD"
+              # 断言 1：两行都落盘且值正确
+              grep -q "^KSU_EXPECTED_SIZE := $KSU_CERT_SIZE\$" "$BAKA_KBUILD" \
+                && grep -q "^KSU_EXPECTED_HASH := $KSU_CERT_HASH\$" "$BAKA_KBUILD" \
+                || { echo "::error::Kbuild 注入失败（注入行未落盘，BakaSU 上游 Kbuild 结构可能已变化）"; exit 1; }
+              # 断言 2：注入块必须位于两个 ifdef 块之前（顺序错会让 size 槽静默失效）
+              POS_INJ=$(grep -n '^KSU_EXPECTED_SIZE := ' "$BAKA_KBUILD" | head -1 | cut -d: -f1)
+              POS_SIZE=$(grep -n '^ifdef KSU_EXPECTED_SIZE$' "$BAKA_KBUILD" | head -1 | cut -d: -f1)
+              POS_HASH=$(grep -n '^ifdef KSU_EXPECTED_HASH$' "$BAKA_KBUILD" | head -1 | cut -d: -f1)
+              if [ -z "$POS_INJ" ] || [ -z "$POS_SIZE" ] || [ -z "$POS_HASH" ] \
+                || [ "$POS_INJ" -ge "$POS_SIZE" ] || [ "$POS_INJ" -ge "$POS_HASH" ]; then
+                echo "::error::Kbuild 注入位置错误: 注入行=$POS_INJ, ifdef KSU_EXPECTED_SIZE=$POS_SIZE, ifdef KSU_EXPECTED_HASH=$POS_HASH（注入必须在两者之前，否则 size 槽静默失效）"
+                exit 1
+              fi
+              echo "Kbuild 注入位置校验通过: 注入行 $POS_INJ < ifdef SIZE $POS_SIZE / ifdef HASH $POS_HASH"
+              # 与 SukiSU/FinaSU 一致：内核完整版本的 @<branch> 固定为品牌名
               bash "$GITHUB_WORKSPACE/scripts/ksu_post_setup.sh" KernelSU bakasu
-              # 上游 BakaSU 自 48fa4bb 起以无条件 $(error) 暂停 SUSFS 内核构建
-              # （等待 simonpunk 同步最新 selinux_hide 模型）。本仓库在 SUSFS 补丁
-              # 阶段已适配该模型（scripts/susfs_fixes/apply.sh），这里替换为上游
-              # 预期的按内核版本门控，详见 scripts/bakasu_compat/resume_susfs.sh
+              # 上游自 48fa4bb 起以无条件 $(error) 暂停 SUSFS 内核构建；
+              # 与历史 BakaSU 分支一致，替换为按内核版本门控（见脚本内注释）
               bash "$GITHUB_WORKSPACE/scripts/bakasu_compat/resume_susfs.sh" KernelSU
               ;;
             "FinaSU")
@@ -1419,6 +1519,20 @@ jobs:
           # 配合 ksu_post_setup.sh 的 REPO_NAME := MuLing 改写，管理器才能显示 @MuLing 后缀
           if [ "${{ inputs.ksu_variant }}" == "BakaSU" ]; then
             echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@%REPO_NAME%"' >> "$DEFCONFIG"
+            # ★ BakaSU 线「一仓库双管理器」的核心开关：
+            #   上游 main 的 apk_sign.c 把「官方槽 + Custom 槽」一起编进
+            #   apk_sign_keys[] 的条件正是 CONFIG_KSU_MULTI_MANAGER_SUPPORT。
+            #   不开启时，KSU_EXPECTED_SIZE/HASH（即「添加 KernelSU」步骤注入的
+            #   BakaSU 官方管理器证书）压根不会被编译进去 —— 管理器认不到内核。
+            # 上游 Kconfig（main:73）`config KSU_MULTI_MANAGER_SUPPORT` 的
+            # default 就是 y，这里显式写入并断言它确实存在，防止上游改名后
+            # olddefconfig 把这个未知符号静默丢弃（那样 BakaSU 管理器会"未安装"）。
+            if grep -qE '^[[:space:]]*config[[:space:]]+KSU_MULTI_MANAGER_SUPPORT$' KernelSU/kernel/Kconfig; then
+              echo 'CONFIG_KSU_MULTI_MANAGER_SUPPORT=y' >> "$DEFCONFIG"
+            else
+              echo "::error::BakaSU Kconfig 已不含 KSU_MULTI_MANAGER_SUPPORT（上游结构可能已变化），双管理器无法成立"
+              exit 1
+            fi
           fi
 
           if [ "${{ inputs.ksu_variant }}" == "SukiSU" ] || [ "${{ inputs.ksu_variant }}" == "BakaSU" ]; then
