@@ -313,3 +313,72 @@ $git='C:\Program Files\Git\cmd\git.exe'
    `#if` / 宏 / 复合字面量上会大量误报（50 条全假），**误报比没有更糟**——
    它会在正常构建时制造假失败。要治本，应该用真编译器
    （`clang -fsyntax-only`）而不是自己写正则。
+
+---
+
+## 12. vendor hook（`DECLARE_HOOK`）注入的两条硬性规则
+
+`apply_kit_onemind.py` 往 `include/trace/hooks/*.h` 注入 hook 时，以下两点错了
+都会**编译全绿、链接才炸**，而且报错信息（`undefined symbol`）离真实原因很远。
+
+### 12.1 守卫必须「镜像 TRACE_HEADER_MULTI_READ」
+
+```c
+/* ❌ 错：第二次包含被挡掉，DEFINE_TRACE 永不生成 */
+#ifndef MZ_KIT_P4_MM_H
+#define MZ_KIT_P4_MM_H
+
+/* ✅ 对：与上游 _TRACE_HOOK_MM_H 自己的写法一致 */
+#if !defined(MZ_KIT_P4_MM_H) || defined(TRACE_HEADER_MULTI_READ)
+#define MZ_KIT_P4_MM_H
+```
+
+**机制**：`<trace/define_trace.h>` 生成 `__tracepoint_*` / `__traceiter_*` /
+`__SCK__tp_func_*` 的方式是**把同一个头文件再包含一次**（此时
+`TRACE_HEADER_MULTI_READ` 已定义）。普通 `#ifndef` 会在第二次包含时把整块跳过，
+于是只剩声明、没有定义。
+
+**最小验证**（不需要跑 CI）：
+```bash
+printf '#define HOOK(n) X_##n\n#include "h.h"\n#define TRACE_HEADER_MULTI_READ\n#include "h.h"\n' > t.c
+gcc -E -P t.c | grep -c X_our     # 期望 2（声明+定义）；普通守卫只会得到 1
+```
+
+**症状对照**（run#8，943 秒编译通过后）：
+```
+ld.lld: error: undefined symbol: __tracepoint_android_vh_extfrag_for_order
+>>> referenced by vendor_hooks.c (___ksymtab_gpl+...)
+>>> referenced by mm.h:180 (include/trace/hooks/mm.h:180) mm/vmstat.o:(extfrag_for_order)
+```
+共 20 个 = 8 hook ×(`__tracepoint_*` + `__traceiter_*`) + SCK 符号。
+**注意**：`referenced by mm.h:180` 说明调用点在、声明也在，缺的只是**定义**。
+
+### 12.2 插入位置在 `#endif /* _TRACE_HOOK_*_H */` 之前是对的
+
+上游头文件尾部固定是：
+```c
+#endif /* _TRACE_HOOK_MM_H */
+
+/* This part must be outside protection */
+#include <trace/define_trace.h>
+```
+把 hook 插在 `#endif` 之前（即保护块内部）是**正确**的——因为第二次包含时
+外层 `#if` 会成立。**不要**按「挪到 define_trace.h 之后」去改，那样反而会让
+第一次包含看不到它。（run#8 时有两条分析都建议挪到 `#endif` 后面，方向是错的，
+是守卫而非位置导致了 undefined。）
+
+### 12.3 不要用 `MZ_DEFINE_VH` 造符号
+
+kit patch 里有个宏：
+```c
+#define MZ_DEFINE_VH(name) \
+	struct tracepoint __tracepoint_##name; \
+	EXPORT_SYMBOL_GPL(__tracepoint_##name); \
+	int __traceiter_##name(void *__data) { return 0; } \
+	EXPORT_SYMBOL_GPL(__traceiter_##name);
+```
+它能让链接通过、符号齐全、门禁 2 的 CRC 也对得上，但 `__traceiter` 是
+**`return 0` 空实现** —— OneMind 的 8 个回调永不触发。**功能全失效但一切检查都是绿的**，
+比直接报错危险得多。21 Pro 只对 `binder_alloc` / `binder_ioctl` /
+`smartzram_tune_swappiness` 这 3 个「只需符号存在」的 hook 用它。
+**8 个 OneMind hook 绝对不能用它。**
