@@ -133,8 +133,6 @@ MM_H_BLOCK = """
  * 因为 TP_PROTO 的形参类型参与 __traceiter_* 的 kCFI Type Hash 计算。
  * 来源: m2481kit/patches/01-m2481-ko-krcrc-and-onemind.patch
  */
-#if !defined(%(mark)s_MM_H) || defined(TRACE_HEADER_MULTI_READ)
-#define %(mark)s_MM_H
 struct readahead_control;
 DECLARE_HOOK(android_vh_extfrag_for_order,
 	TP_PROTO(void *info, struct zone *zone, unsigned int order),
@@ -154,7 +152,6 @@ DECLARE_HOOK(android_vh_mm_vip_alloc_harder_stat,
 DECLARE_HOOK(android_vh_ra_tuning_max_page,
 	TP_PROTO(struct readahead_control *ractl, unsigned long *max_pages),
 	TP_ARGS(ractl, max_pages));
-#endif /* %(mark)s_MM_H */
 
 """ % {"mark": MARK}
 
@@ -165,8 +162,6 @@ VMSCAN_H_ANCHOR = "#endif /* _TRACE_HOOK_VMSCAN_H */"
 
 VMSCAN_H_BLOCK = """
 /* %(mark)s: OneMind 8 大 Hook(MGLRU 部分), 签名与原厂一致 */
-#if !defined(%(mark)s_VMSCAN_H) || defined(TRACE_HEADER_MULTI_READ)
-#define %(mark)s_VMSCAN_H
 struct lruvec;
 struct lru_gen_folio;
 DECLARE_HOOK(android_vh_memcg_filepages_protect,
@@ -176,7 +171,6 @@ DECLARE_HOOK(android_vh_memcg_protect_lru_gen_add_folio,
 	TP_PROTO(int type, struct lru_gen_folio *lrugen, struct lruvec *lruvec,
 		unsigned long *seq),
 	TP_ARGS(type, lrugen, lruvec, seq));
-#endif /* %(mark)s_VMSCAN_H */
 
 """ % {"mark": MARK}
 
@@ -224,32 +218,40 @@ def _ensure_hooks(p, rel, anchor, block, tag):
     src = p.read(rel)
 
     # ---------------------------------------------------------------
-    # ★ 守卫修正（必须在"是否已声明"判断之前做）
+    # ★ 不要自建 #ifndef 守卫（run#8/run#9 的 20 个 undefined 的真因）
     # ---------------------------------------------------------------
-    # run#8 实测：把 DECLARE_HOOK 整块插在 #endif /* _TRACE_HOOK_MM_H */ 之前
-    # 是【对的】，但块自身若用 `#ifndef MZ_KIT_P4_MM_H` 保护，就会挡住
-    # <trace/define_trace.h> 触发的【第二次包含】(TRACE_HEADER_MULTI_READ)：
-    #   · 第一次包含：MZ_KIT_P4_MM_H 未定义 -> 展开（只有声明）
-    #   · 第二次包含：MZ_KIT_P4_MM_H 已定义 -> 被 #ifndef 挡掉
-    #     -> DEFINE_TRACE / __tracepoint_* / __traceiter_* 从未生成
-    #   -> vmlinux 链接报 20 个 undefined symbol（__tracepoint_*/__traceiter_*/__SCK__tp_func_*）
-    # 上游头文件自己的守卫就是这种"镜像 TRACE_HEADER_MULTI_READ"写法，必须一致。
-    # 这里做就地修正，使【已经插错过】的树也能被自动救回来。
+    # 我们的 DECLARE_HOOK 插在 `#endif /* _TRACE_HOOK_MM_H */` 之前，
+    # 位置是对的。但若给这一段加【自己的】守卫，无论写 #ifndef 还是
+    # 镜像写法 `#if !defined(X) || defined(TRACE_HEADER_MULTI_READ)`，都会失效：
+    #
+    #   <trace/hooks/vendor_hooks.h>（mm.h 顶部 include）在
+    #   #ifdef TRACE_HEADER_MULTI_READ 分支末尾有 `#undef TRACE_HEADER_MULTI_READ`
+    #   （注释：prevent additional recursion）。
+    #   所以 mm.h 文件【后半段】求值时 TRACE_HEADER_MULTI_READ 已经不可见：
+    #     第一次包含 -> 守卫成立（MZ_KIT_P4_MM_H 未定义）-> 只出声明
+    #     第二次包含 -> TRACE_HEADER_MULTI_READ 已 undef，且 MZ_KIT_P4_MM_H 已定义
+    #                   -> 守卫为假 -> DEFINE_HOOK_FN 不执行
+    #                   -> __tracepoint_*/__traceiter_*/__SCK__tp_func_* 永不生成
+    #              -> vmlinux 链接 20 个 undefined symbol。
+    #
+    # 已用 cpp 最小复现验证（同一文件里两个 hook）：
+    #     带自建守卫 -> 第二遍被跳过（只有 DECL_）
+    #     裸 DECLARE_HOOK -> 第二遍正常展开（DEF_ 生成）✓
+    #
+    # 上游那 ~50 个 hook 也没有自己的守卫：展开次数完全由 mm.h 顶部的
+    # `#if !defined(_TRACE_HOOK_MM_H) || defined(TRACE_HEADER_MULTI_READ)` 控制，
+    # 而那一行在 vendor_hooks.h 之前、MULTI_READ 仍然可见。
+    # 结论：我们只放裸 DECLARE_HOOK，不加任何自建守卫。
+    # 旧树里若残留了自建守卫，就地删掉（让它们退化成裸插）。
     # ---------------------------------------------------------------
-    old_guard = "#ifndef %s_%s\n#define %s_%s\n" % (MARK, tag, MARK, tag)
-    new_guard = ("#if !defined(%s_%s) || defined(TRACE_HEADER_MULTI_READ)\n"
-                 "#define %s_%s\n" % (MARK, tag, MARK, tag))
-    if old_guard in src:
-        src = src.replace(old_guard, new_guard, 1)
-        p.write(rel, src)
-        p.note("  已修: %s (守卫改为镜像 TRACE_HEADER_MULTI_READ，否则 DEFINE_TRACE 不生成)" % rel)
-
-    # 兜底：kit 辅助脚本可能把 8 个 DECLARE_HOOK **无守卫**裸插进头部
-    # （即根本没有 MZ_KIT_P4 的 #ifndef/#define 包裹）。那种形态本身不挡
-    # MULTI_READ 第二遍，无需改守卫；此处仅记录，便于排查。
-    if ("%s_%s" % (MARK, tag)) not in src and re.search(
-            r"DECLARE_HOOK\(\s*%s\s*," % re.escape(names[0]), src):
-        p.note("  注意: %s 里的 hook 是无守卫裸插入（kit 辅助脚本所为），跳过守卫修正" % rel)
+    for _old in ("#ifndef %s_%s\n" % (MARK, tag),
+                 "#if !defined(%s_%s) || defined(TRACE_HEADER_MULTI_READ)\n" % (MARK, tag)):
+        _blk = _old + "#define %s_%s\n" % (MARK, tag)
+        if _blk in src:
+            src = src.replace(_blk, "", 1)
+            src = src.replace("#endif /* %s_%s */\n" % (MARK, tag), "", 1)
+            p.write(rel, src)
+            p.note("  已修: %s (删除自建守卫，改为裸 DECLARE_HOOK)" % rel)
 
     declared = [n for n in names
                 if _re.search(r"DECLARE_HOOK\(\s*%s\s*," % _re.escape(n), src)]
@@ -293,11 +295,11 @@ def _ensure_hooks(p, rel, anchor, block, tag):
         #   新块里已不再含该字面串 -> marker 永不命中 -> 重复插入 / 判据失效。
         #   改用每个块都必然带的尾巴注释作 marker。
         p.insert_before(rel, anchor, "\n" + extra + "\n",
-                        "#endif /* %s_%s */" % (MARK, tag))
+                        "/* %s: OneMind" % MARK)
         return
 
     # 完全没声明 -> 插入整块
-    p.insert_before(rel, anchor, block, "#endif /* %s_%s */" % (MARK, tag))
+    p.insert_before(rel, anchor, block, "/* %s: OneMind" % MARK)
 
 
 # ======================================================================
