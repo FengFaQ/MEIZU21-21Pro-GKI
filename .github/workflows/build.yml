@@ -1799,6 +1799,34 @@ jobs:
               exit 1
             fi
             echo "OK: OneMind 注入完成（kit patch 本体仍跳过）"
+
+            # -----------------------------------------------------------
+            # ★ 补齐厂商模块真正 NEED 的 KMI 导出（run#11 之后新增）
+            # -----------------------------------------------------------
+            # run#11 三门禁全绿、门禁 2 只报「Missing stock symbols: 16」并 WARN 放行，
+            # 但用 魅族21/device/module_kmi_manifest.txt 的 NEED 列表逐条核对后发现，
+            # 其中 5 个是厂商 .ko 真的会 NEED 的：
+            #   __tracepoint_android_vh_smartzram_tune_swappiness
+            #   __tracepoint_mm_vmscan_kswapd_wake
+            #   mem_cgroup_id_put2 / pm_system_irq_wakeup / reclaim_pages
+            # 缺了 -> 模块加载 Unknown symbol -> 卡第一屏。
+            # 门禁 2 对 missing 只 WARN（它分不清"原厂有但没用到"和"模块真的需要"），
+            # 所以必须在构建期补上，不能指望门禁拦住。
+            # apply_kmi_exports.py 只做"导出/补桩"，不碰 OneMind 与 kCFI 保活。
+            # -----------------------------------------------------------
+            set +e
+            python3 "$GITHUB_WORKSPACE/scripts/apply_kmi_exports.py" --kernel-root "$COMMON" 2>&1 \
+              | tee -a "$GITHUB_WORKSPACE/build-logs/kmi_exports.log"
+            KMI_RC=${PIPESTATUS[0]}
+            set -e
+            echo "apply_kmi_exports 退出码: $KMI_RC"
+            if [ "$KMI_RC" -ne 0 ]; then
+              echo "::error title=KMI 导出补齐失败::apply_kmi_exports.py 返回 $KMI_RC"
+              echo "  缺少这些符号会导致厂商 .ko 加载 Unknown symbol -> 卡第一屏"
+              echo "  详见 build-logs/kmi_exports.log"
+              exit 1
+            fi
+            echo "OK: 厂商 NEED 的 KMI 符号导出完成"
             git -C "$COMMON" diff --stat 2>/dev/null | tail -20 || true
             exit 0
           fi
