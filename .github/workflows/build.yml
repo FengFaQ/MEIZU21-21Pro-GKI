@@ -1353,7 +1353,46 @@ jobs:
           fi
 
           echo "CONFIG_BBG=y" >> common/arch/arm64/configs/gki_defconfig
-          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' common/security/Kconfig
+          # ⚠ 必须把 baseband_guard 追加到 CONFIG_LSM 列表的【末尾】，
+          #   绝不能像以前那样把 "selinux" 替换成 "selinux,baseband_guard"。
+          #   以前的做法会把 baseband_guard 插在 selinux 与后续 LSM 之间：
+          #       ...,integrity,apparmor,selinux,baseband_guard,smack,tomoyo,bpf
+          #   而 security/security.c 是【严格按 CONFIG_LSM 顺序】初始化并分配
+          #   各 LSM 的 security blob 索引的。插在中间会让 selinux 之后的
+          #   LSM（smack/tomoyo 等）拿到错位的行为，实测症状是
+          #   「MG logo 亮起后立即重启」（真机 run#24 复现）。
+          #   正确形态（与 BBG 上游 setup.sh 的提示一致）：
+          #       ...,apparmor,selinux,smack,tomoyo,bpf,baseband_guard
+          python3 - <<'PYSED'
+          import io as _io, re as _re
+          p = "common/security/Kconfig"
+          src = _io.open(p, encoding="utf-8").read()
+          out, n = [], 0
+          in_lsm = False
+          for line in src.splitlines(keepends=True):
+              st = line.strip()
+              if _re.match(r"^config\s+LSM\s*$", st):
+                  in_lsm = True
+                  out.append(line); continue
+              if in_lsm and _re.match(r"^config\s+", st):
+                  in_lsm = False
+              if in_lsm and st.startswith("default"):
+                  if "landlock" in line and "baseband_guard" not in line:
+                      line = _re.sub(r'"([^"]+)"',
+                                     lambda m: '"%s,baseband_guard"' % m.group(1),
+                                     line, count=1)
+                      n += 1
+              out.append(line)
+          _io.open(p, "w", encoding="utf-8", newline="").write("".join(out))
+          print("CONFIG_LSM 默认行已追加 baseband_guard: %d 处" % n)
+          PYSED
+          # 自检：确认 baseband_guard 确实在集合里，且不在 selinux 与其它 LSM 之间
+          if ! grep -q 'baseband_guard' common/security/Kconfig; then
+            echo "::error title=BBG 配置失败::security/Kconfig 里没找到 baseband_guard"
+            exit 1
+          fi
+          echo "  security/Kconfig 的 LSM 默认行:"
+          sed -n '/^config LSM$/,/^config /p' common/security/Kconfig | grep -E '^\s*default' | sed 's/^/    /'
 
       - name: 添加 网络增强配置 (IPSet + BBR)
         if: inputs.use_net_enhance
