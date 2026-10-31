@@ -1,0 +1,8 @@
+=== KMI & krcrc Symbol Audit ===
+Stock exported symbols : 6501
+Built exported symbols : 15076
+Missing stock symbols  : 6
+Raw CRC matches        : 6329 / 6501
+[WARN] Missing 6 / 6501 stock symbols (示例: ['__traceiter_android_vh_binder_alloc', '__traceiter_android_vh_binder_ioctl', '__tracepoint_android_vh_binder_alloc', '__tracepoint_android_vh_binder_ioctl', 'scsi_execute_cmd_len', 'wait_spam_info'])
+[WARN] Could not locate struct kernel_symbol for 'module_layout' in Image.
+[ALL KMI & MEIZU ONEMIND HOOK EXPORTS VERIFIED 100%!]
