@@ -1,0 +1,30 @@
+# MEIZU 21 (M2461 / SM8650 Pineapple) boot.img header v4
+# Measured from the stock Flyme 12.7.0.0A boot.img.
+#
+# First bytes of the header, little-endian u32 (offsets are authoritative):
+#   [ 0] ANDROID!          magic
+#   [ 8] kernel_size       33892864
+#   [12] ramdisk_size      0
+#   [16] os_version        0x1c00017a  (14.0.0, patch 2007-00)
+#   [20] header_size       1584
+#   [40] header_version    4
+#
+# Format: key=value, one per line, '#' starts a comment.
+magic=ANDROID!
+file_size=100663296
+header_version=4
+header_size=1584
+kernel_size=33892864
+kernel_offset=4096
+ramdisk_size=0
+os_version=0x1c00017a
+os_version_decoded=14.0.0/2023-10
+cmdline=
+signature_size=0
+avb_vbmeta_offset=0x2054000
+avb_vbmeta_size=2496
+stock_sha256=8c899eb3b7fcb65eff6bb4afd015f90984ce50d351eceb7eda7ef06bbc4619f5
+
+# NOTE: Meizu 21 and Meizu 21 Pro share byte-identical boot header fields
+# (size / header_version / header_size / os_version / vbmeta offsets).
+# The ONLY reliable discriminator is the stock image sha256.

@@ -79,6 +79,7 @@ DEVICE_REGISTRY = {
         "soc": "SM8650",
         "stock_sha256": {
             "12a0a75750e2fdb0": "魅族 21(普通版) 原厂 boot.img (Flyme 12.6)",
+            "8c899eb3b7fcb65e": "魅族 21(普通版) 原厂 boot.img (Flyme 12.7.0.0A)",
         },
     },
 }

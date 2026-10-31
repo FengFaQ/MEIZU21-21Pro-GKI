@@ -14,14 +14,17 @@
 ```
 MEIZU 21pro/              ← 魅族 21 Pro (M2481) 专属
   device/                 ← 设备事实：原厂 config / KMI 基准 / AVB 模板 / kit 补丁
-  meizu21pro.yml          ← 21 Pro 构建入口（workflow_dispatch）
-魅族21/                    ← 魅族 21 (M2461) 专属（设备素材待补）
+魅族21/                    ← 魅族 21 (M2461) 专属
+  device/                 ← 设备事实（已由 Flyme 12.7 线刷包提取齐全）
 .github/workflows/
   build.yml               ← 共享主流水线（workflow_call，两机型复用）
+  meizu21pro.yml          ← 21 Pro 构建入口
   meizu21.yml             ← 魅族 21 构建入口
   emergency-cleanup.yml   ← 紧急下架
 scripts/                  ← 两机型共用的脚本（AVB / kCFI / krcrc / kit 补丁……）
 config/ data/ security_patch/ zram/ zram_patch/ hmbird_patch.c
+HANDOFF.md                ← 交接文档：现在在哪、下一步做什么
+MEMORY.md                 ← 记忆文档：为什么这么做、踩过哪些坑
 ```
 
 ---
@@ -30,14 +33,14 @@ config/ data/ security_patch/ zram/ zram_patch/ hmbird_patch.c
 
 | 项 | 魅族 21 | 魅族 21 Pro |
 |---|---|---|
-| 工作流文件 | `.github/workflows/meizu21.yml` | `MEIZU 21pro/meizu21pro.yml` |
+| 工作流文件 | `.github/workflows/meizu21.yml` | `.github/workflows/meizu21pro.yml` |
 | `device_dir` | `魅族21/device` | `MEIZU 21pro/device` |
 | release 标签 | `meizu21-finatsu-<run#>` | `meizu21pro-finatsu-<run#>` |
 | latest 标签 | `meizu21-latest` | `meizu21pro-latest` |
 | **dist 分支** | **`dist-meizu21`** | **`dist`** |
 | concurrency | `meizu21-*` | `meizu21pro-*` |
 
-其余全部复用 `build.yml`。
+其余全部复用 `build.yml`。**dist 分支必须分开**，否则两个机型互相覆盖。
 
 ---
 
@@ -66,6 +69,18 @@ job3 release       : 内核产物 + **这一版编译所用的那份 APK** 一�
 | 1/3 | 内核版本串 `6.1.25-android14-11-maybe-dirty` | **硬失败**（串错 = 模块全不加载，必然开不了机） |
 | 2/3 | KMI 审计 + krcrc 二进制 CRC 锁定（对照原厂 6501 符号） | **硬失败**（CRC 错 = 模块拒载） |
 | 3/3 | kCFI 类型哈希（10 函数 + 8 个 OneMind traceiter 调用点） | 默认 warn（可开 `strict_kcfi` 转硬失败） |
+
+> 门禁 1 的期望串从 `device/so.txt` 的 `kernel_release=` 读取，不再写死在 `build.yml`
+> （`build.yml` 是两机型共享的）。
+
+---
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [`HANDOFF.md`](HANDOFF.md) | **交接文档**：当前进度、下一步、已知风险 |
+| [`MEMORY.md`](MEMORY.md) | **记忆文档**：铁律、踩坑表、决策理由、放弃的事项 |
 
 ---
 

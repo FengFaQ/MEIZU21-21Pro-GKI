@@ -1674,8 +1674,14 @@ jobs:
           echo "内核源码根: $COMMON"
           mkdir -p "$GITHUB_WORKSPACE/build-logs"
           PATCH="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}/patches/01-m2481-ko-krcrc-and-onemind.patch"
+          # kit 补丁是「21 Pro（m2481）专属」的 15 文件 patch：
+          #   · onemind 的 DECLARE_HOOK / ko krcrc 都来自 21 Pro 的 kit
+          #   · 21 普通版（m2461）目前没有对应 patch，走"跳过"分支
+          #     —— 缺的是 onemind hook 与 ko 侧 krcrc 结构，不影响
+          #        门禁 2 的 __kcrctab 二进制 CRC 锁定（那是独立脚本）。
+          # 以后为 21 也做出 patch 时，把文件名统一留在这里即可自动接上。
           if [ ! -f "$PATCH" ]; then
-            echo "::warning title=跳过 kit 补丁::缺 $PATCH"
+            echo "::warning title=跳过 kit 补丁::缺 $PATCH（该机型没有专属 patch，正常）"
             exit 0
           fi
 
@@ -1982,11 +1988,23 @@ jobs:
           echo "Image: $IMG"
           GOT=$(strings "$IMG" | grep -m1 'Linux version' || true)
           echo "$GOT"
-          WANT="6.1.25-android14-11-maybe-dirty"
+          # 版本串：原厂值以设备事实里的 so.txt / boot_header.txt 为准。
+          # ⚠ build.yml 是两机型共享的，不能写死。DEVICE_DIR 由入口工作流传入。
+          DEV_DIR="$GITHUB_WORKSPACE/${DEVICE_DIR:-MEIZU 21pro/device}"
+          WANT=""
+          if [ -f "$DEV_DIR/so.txt" ]; then
+            WANT=$(sed -n 's/^kernel_release=//p' "$DEV_DIR/so.txt" | head -1 | tr -d ' \r')
+          fi
+          # 兜底：so.txt 缺失或没写 kernel_release 时退回 inputs.version
+          if [ -z "${WANT:-}" ]; then
+            WANT="${{ inputs.version }}"
+            echo "::warning title=so.txt 未提供 kernel_release::退回 inputs.version=$WANT"
+          fi
+          echo "期望版本串: $WANT  (来源: ${DEV_DIR}/so.txt)"
           if ! printf '%s' "$GOT" | grep -q "$WANT"; then
             echo "::error title=内核版本串不符::期望含 $WANT, 实际: $GOT"
-            echo "  厂商 471 个 .ko 的 vermagic 写死了这一串(system_dlkm 57 个模块的"
-            echo "  目录名也靠 uname -r 命中), 不一致 -> 模块全部加载失败 -> 卡第一屏。"
+            echo "  厂商 .ko 的 vermagic 写死了这一串(system_dlkm 模块的目录名也靠"
+            echo "  uname -r 命中), 不一致 -> 模块全部加载失败 -> 卡第一屏。"
             exit 1
           fi
           echo "OK: 版本串含 $WANT"
@@ -2399,8 +2417,14 @@ jobs:
             echo "::error title=AVB 模板机型不符::来源清单校验失败, 拒绝打包"; exit 1; }
           TPL_DEVICE=$(sed -n 's/^device=//p' "$SOURCE_TXT" | head -1 | tr -d ' \r')
           echo "  模板机型: $TPL_DEVICE"
-          [ "$TPL_DEVICE" = "meizu21pro" ] || {
-            echo "::error title=AVB 模板机型不符::模板是 $TPL_DEVICE, 本流水线是 meizu21pro"; exit 1; }
+          # ⚠ 本步骤在 build.yml（两机型共享）里，不能写死 meizu21pro。
+          #   期望机型从设备目录名推算：'MEIZU 21pro/device' -> meizu21pro
+          #                              '魅族21/device'     -> meizu21
+          TPL_WANT_DEVICE=$(printf '%s' "${DEVICE_DIR:-MEIZU 21pro/device}" | sed 's#/.*$##' \
+            | tr 'A-Z' 'a-z' | tr -d ' ' | sed 's/^魅族/meizu/')
+          echo "  期望机型: $TPL_WANT_DEVICE (由 device_dir 推算)"
+          [ "$TPL_DEVICE" = "$TPL_WANT_DEVICE" ] || {
+            echo "::error title=AVB 模板机型不符::模板是 $TPL_DEVICE, 本流水线是 $TPL_WANT_DEVICE"; exit 1; }
 
           # ---- 真正打包 ----
           python3 "$REPACK" \

@@ -1,0 +1,22 @@
+# MEIZU 21 (M2461) — kernel release and module ABI facts
+#
+# The kernel release string MUST equal the stock one character for character:
+#   system_dlkm modules live in /system_dlkm/lib/modules/<release>/
+#   and their vermagic carries the same localversion.
+kernel_release=6.1.25-android14-11-maybe-dirty
+localversion=-android14-11-maybe-dirty
+kmi=android14-6.1.25
+os_patch_level=2023-10
+arch=arm64
+
+# vendor_dlkm modules: 304 .ko, vermagic WITHOUT localversion
+# system_dlkm modules: 57 .ko, vermagic WITH -android14-11-maybe-dirty
+vermagic_vendor=6.1.25 SMP preempt mod_unload modversions aarch64
+vermagic_system=6.1.25-android14-11-maybe-dirty SMP preempt mod_unload modversions aarch64
+
+# Stock kernel config highlights (from IKCONFIG):
+#   CONFIG_LTO_NONE=y            (must stay none; thin changes kCFI hashes)
+#   CONFIG_CFI_CLANG=y           (kCFI enabled -> type hashes must match)
+#   CONFIG_TRIM_UNUSED_KSYMS=y   + UNUSED_KSYMS_WHITELIST (Meizu internal path)
+#   CONFIG_PANIC_ON_OOPS=y / PANIC_TIMEOUT=-1
+#   CONFIG_MODVERSIONS=y (symbol CRC enforced at load)
